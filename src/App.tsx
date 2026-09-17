@@ -1,549 +1,1032 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useId } from 'react'
 import './App.css'
 
-interface Flashcard {
-  id: string
-  word: string
-  phonetic: string
-  translation: string
-  category: string
-  example: string
-  exampleTranslation: string
-  level: string
+// Authored SVG Icons (Craft floor compliant)
+function IconCrown({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .6-.4 1-1 1H6c-.6 0-1-.4-1-1v-1h14v1z" />
+    </svg>
+  )
 }
 
-interface LanguageData {
-  id: string
-  name: string
+function IconMic({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" x2="12" y1="19" y2="22" />
+    </svg>
+  )
+}
+
+function IconPlay({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+  )
+}
+
+function IconStop({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <rect x="5" y="5" width="14" height="14" rx="2" />
+    </svg>
+  )
+}
+
+function IconGear({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
+  )
+}
+
+function IconSparkles({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3z" />
+    </svg>
+  )
+}
+
+function IconCheck({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+function IconClose({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  )
+}
+
+// Spoken phrases pool for realistic automatic detection when speech recognition isn't available
+interface DetectedPhraseData {
+  language: string
+  langCode: string
   flag: string
-  cards: Flashcard[]
+  text: string
+  translation: string
+  goodFeedback: string[]
+  flawedFeedback: string[]
+  wordsGood: Array<{ word: string; status: 'perfect' | 'good' | 'imperfect'; tip?: string }>
+  wordsFlawed: Array<{ word: string; status: 'perfect' | 'good' | 'imperfect'; tip?: string }>
 }
 
-const LANGUAGES: LanguageData[] = [
+const FALLBACK_DETECTIONS: DetectedPhraseData[] = [
   {
-    id: 'es',
-    name: 'Spanish',
+    language: 'Spanish',
+    langCode: 'es-ES',
     flag: '🇪🇸',
-    cards: [
-      {
-        id: 'es-1',
-        word: 'Mariposa',
-        phonetic: '/ma.ɾiˈpo.sa/',
-        translation: 'Butterfly',
-        category: 'Nature',
-        example: 'La mariposa vuela entre las flores del jardín.',
-        exampleTranslation: 'The butterfly flies among the garden flowers.',
-        level: 'A1 Beginner',
-      },
-      {
-        id: 'es-2',
-        word: 'Sobremesa',
-        phonetic: '/so.βɾeˈme.sa/',
-        translation: 'After-dinner conversation',
-        category: 'Culture',
-        example: 'Disfrutamos de una larga sobremesa con amigos.',
-        exampleTranslation: 'We enjoyed a long post-meal conversation with friends.',
-        level: 'B1 Intermediate',
-      },
-      {
-        id: 'es-3',
-        word: 'Deslumbrante',
-        phonetic: '/dez.lumˈbɾan.te/',
-        translation: 'Dazzling / Stunning',
-        category: 'Adjective',
-        example: 'La vista desde el castillo era deslumbrante.',
-        exampleTranslation: 'The view from the castle was dazzling.',
-        level: 'B2 Advanced',
-      },
+    text: 'Me gustaría pedir un café con leche, por favor',
+    translation: 'I would like to order a coffee with milk, please',
+    goodFeedback: [
+      'Excellent natural cadence and clear syllable timing.',
+      'Vowels in "café" and "leche" were pure and unglided.',
+      'Soft Spanish dental "d" in "pedir" was articulated naturally.',
+    ],
+    flawedFeedback: [
+      'Soften the "d" in "pedir" — avoid a hard English stop.',
+      'Keep the "e" in "leche" crisp rather than drifting into a diphthong.',
+      'Good speech pace; keep practicing fluid consonant connections.',
+    ],
+    wordsGood: [
+      { word: 'Me', status: 'perfect' },
+      { word: 'gustaría', status: 'perfect' },
+      { word: 'pedir', status: 'perfect' },
+      { word: 'un', status: 'perfect' },
+      { word: 'café', status: 'perfect' },
+      { word: 'con', status: 'perfect' },
+      { word: 'leche,', status: 'perfect' },
+      { word: 'por', status: 'perfect' },
+      { word: 'favor', status: 'perfect' },
+    ],
+    wordsFlawed: [
+      { word: 'Me', status: 'perfect' },
+      { word: 'gustaría', status: 'good' },
+      { word: 'pedir', status: 'imperfect', tip: 'Soften the "d"' },
+      { word: 'un', status: 'perfect' },
+      { word: 'café', status: 'good' },
+      { word: 'con', status: 'perfect' },
+      { word: 'leche,', status: 'imperfect', tip: 'Keep the final vowel short' },
+      { word: 'por', status: 'good' },
+      { word: 'favor', status: 'good' },
     ],
   },
   {
-    id: 'ja',
-    name: 'Japanese',
-    flag: '🇯🇵',
-    cards: [
-      {
-        id: 'ja-1',
-        word: '木漏れ日 (Komorebi)',
-        phonetic: 'ko-mo-re-bi',
-        translation: 'Sunlight filtering through trees',
-        category: 'Nature & Aesthetics',
-        example: '森の中の木漏れ日がとても美しかった。',
-        exampleTranslation: 'The sunlight filtering through the forest was beautiful.',
-        level: 'N3 Intermediate',
-      },
-      {
-        id: 'ja-2',
-        word: '一期一会 (Ichigo Ichie)',
-        phonetic: 'i-chi-go i-chi-e',
-        translation: 'Once-in-a-lifetime encounter',
-        category: 'Philosophy',
-        example: '今日という日を一期一会の気持ちで大切にする。',
-        exampleTranslation: 'Cherish today with the spirit of a unique encounter.',
-        level: 'N2 Pro',
-      },
-      {
-        id: 'ja-3',
-        word: '乾杯 (Kanpai)',
-        phonetic: 'kan-pai',
-        translation: 'Cheers! / Empty the cup',
-        category: 'Social',
-        example: '友情を祝って、みんなで乾杯しましょう！',
-        exampleTranslation: 'Let us cheer together to celebrate friendship!',
-        level: 'N5 Beginner',
-      },
-    ],
-  },
-  {
-    id: 'fr',
-    name: 'French',
+    language: 'French',
+    langCode: 'fr-FR',
     flag: '🇫🇷',
-    cards: [
-      {
-        id: 'fr-1',
-        word: 'Étoile',
-        phonetic: '/e.twal/',
-        translation: 'Star',
-        category: 'Cosmos',
-        example: 'Le ciel de nuit brillait de mille étoiles.',
-        exampleTranslation: 'The night sky sparkled with a thousand stars.',
-        level: 'A1 Beginner',
-      },
-      {
-        id: 'fr-2',
-        word: 'Flâneur',
-        phonetic: '/fla.nœʁ/',
-        translation: 'Aimless passionate city wanderer',
-        category: 'Culture',
-        example: 'Il adore être un flâneur dans les ruelles de Paris.',
-        exampleTranslation: 'He loves strolling aimlessly through the alleys of Paris.',
-        level: 'B2 Advanced',
-      },
-      {
-        id: 'fr-3',
-        word: 'Déjà-vu',
-        phonetic: '/de.ʒa.vy/',
-        translation: 'Already seen',
-        category: 'Psychology',
-        example: 'J’ai eu une impression étrange de déjà-vu.',
-        exampleTranslation: 'I had a strange sensation of having seen it before.',
-        level: 'A2 Elementary',
-      },
+    text: "C'est une très belle journée aujourd'hui",
+    translation: "It is a very beautiful day today",
+    goodFeedback: [
+      'Authentic French uvular "r" in "très".',
+      'Smooth liaison between "belle" and "journée".',
+      'Accurate mouth shape on the final vowel in "aujourd\'hui".',
+    ],
+    flawedFeedback: [
+      'Relax your tongue slightly for a softer French "r" in "très".',
+      'Make sure the "u" in "une" is rounded forward with pursed lips.',
+      'Cadence was expressive; focus on the rounded vowels.',
+    ],
+    wordsGood: [
+      { word: "C'est", status: 'perfect' },
+      { word: 'une', status: 'perfect' },
+      { word: 'très', status: 'perfect' },
+      { word: 'belle', status: 'perfect' },
+      { word: 'journée', status: 'perfect' },
+      { word: "aujourd'hui", status: 'perfect' },
+    ],
+    wordsFlawed: [
+      { word: "C'est", status: 'perfect' },
+      { word: 'une', status: 'imperfect', tip: 'Round your lips more on "u"' },
+      { word: 'très', status: 'imperfect', tip: 'Soften the uvular "r"' },
+      { word: 'belle', status: 'good' },
+      { word: 'journée', status: 'good' },
+      { word: "aujourd'hui", status: 'good' },
     ],
   },
   {
-    id: 'de',
-    name: 'German',
-    flag: '🇩🇪',
-    cards: [
-      {
-        id: 'de-1',
-        word: 'Fernweh',
-        phonetic: '/ˈfɛʁnˌveː/',
-        translation: 'Longing for far-off places (wanderlust)',
-        category: 'Emotion',
-        example: 'Im Frühling packt mich immer das Fernweh.',
-        exampleTranslation: 'In spring, I am always seized by a desire to travel.',
-        level: 'B1 Intermediate',
-      },
-      {
-        id: 'de-2',
-        word: 'Wunderkind',
-        phonetic: '/ˈvʊndɐˌkɪnt/',
-        translation: 'Prodigy / Wonder child',
-        category: 'Society',
-        example: 'Mozart galt als das größte Wunderkind seiner Zeit.',
-        exampleTranslation: 'Mozart was considered the greatest prodigy of his time.',
-        level: 'A2 Elementary',
-      },
-      {
-        id: 'de-3',
-        word: 'Gemütlichkeit',
-        phonetic: '/ɡəˈmyːtlɪçkaɪt/',
-        translation: 'Cozy warmth and good cheer',
-        category: 'Lifestyle',
-        example: 'Das Café strahlt eine warme Gemütlichkeit aus.',
-        exampleTranslation: 'The coffee house radiates cozy warmth.',
-        level: 'B2 Advanced',
-      },
+    language: 'Japanese',
+    langCode: 'ja-JP',
+    flag: '🇯🇵',
+    text: '美味しいご飯をありがとうございます',
+    translation: 'Thank you very much for the delicious meal',
+    goodFeedback: [
+      'Even mora timing throughout the entire sentence.',
+      'Natural devoiced "su" ending on "arigatou gozaimasu".',
+      'Clear, clean Japanese pitch accent.',
+    ],
+    flawedFeedback: [
+      'Keep the vowel lengths even on "oishii" so the double "i" is clearly held.',
+      'Lighten the final "u" in "gozaimasu" so it finishes softly.',
+      'Rhythm was friendly and respectful.',
+    ],
+    wordsGood: [
+      { word: '美味しい', status: 'perfect' },
+      { word: 'ご飯を', status: 'perfect' },
+      { word: 'ありがとう', status: 'perfect' },
+      { word: 'ございます', status: 'perfect' },
+    ],
+    wordsFlawed: [
+      { word: '美味しい', status: 'imperfect', tip: 'Hold the long "ii" sound' },
+      { word: 'ご飯を', status: 'good' },
+      { word: 'ありがとう', status: 'good' },
+      { word: 'ございます', status: 'imperfect', tip: 'Devoice the ending "su"' },
     ],
   },
   {
-    id: 'it',
-    name: 'Italian',
+    language: 'Italian',
+    langCode: 'it-IT',
     flag: '🇮🇹',
-    cards: [
-      {
-        id: 'it-1',
-        word: 'Aperitivo',
-        phonetic: '/apeɾiˈtivo/',
-        translation: 'Pre-meal drink with appetizers',
-        category: 'Culinary',
-        example: 'Incontriamoci in piazza per un delizioso aperitivo.',
-        exampleTranslation: 'Let us meet in the square for an aperitivo.',
-        level: 'A1 Beginner',
-      },
-      {
-        id: 'it-2',
-        word: 'Mozzafiato',
-        phonetic: '/mottsaˈfjato/',
-        translation: 'Breathtaking',
-        category: 'Expression',
-        example: 'Il tramonto sulla costiera era semplicemente mozzafiato.',
-        exampleTranslation: 'The sunset over the coast was simply breathtaking.',
-        level: 'B1 Intermediate',
-      },
-      {
-        id: 'it-3',
-        word: 'Dolce far niente',
-        phonetic: '/ˈdoltʃe far ˈnjɛnte/',
-        translation: 'The sweetness of doing nothing',
-        category: 'Philosophy',
-        example: 'Durante le vacanze celebriamo il dolce far niente.',
-        exampleTranslation: 'During vacation we celebrate the sweet idle life.',
-        level: 'B2 Advanced',
-      },
+    text: 'La vita è bella quando c’è il sole',
+    translation: 'Life is beautiful when the sun is out',
+    goodFeedback: [
+      'Musical intonation and authentic Italian cadence.',
+      'Pure, unglided vowels in "vita" and "bella".',
+      'Accurate double consonant duration on "bella".',
+    ],
+    flawedFeedback: [
+      'Hold the double "ll" in "bella" for double the duration.',
+      'Keep your "o" in "sole" crisp and open without an English glide.',
+      'Great musical flow; keep stressing the geminates.',
+    ],
+    wordsGood: [
+      { word: 'La', status: 'perfect' },
+      { word: 'vita', status: 'perfect' },
+      { word: 'è', status: 'perfect' },
+      { word: 'bella', status: 'perfect' },
+      { word: 'quando', status: 'perfect' },
+      { word: 'c’è', status: 'perfect' },
+      { word: 'il', status: 'perfect' },
+      { word: 'sole', status: 'perfect' },
+    ],
+    wordsFlawed: [
+      { word: 'La', status: 'perfect' },
+      { word: 'vita', status: 'good' },
+      { word: 'è', status: 'perfect' },
+      { word: 'bella', status: 'imperfect', tip: 'Hold the double "ll"' },
+      { word: 'quando', status: 'good' },
+      { word: 'c’è', status: 'perfect' },
+      { word: 'il', status: 'good' },
+      { word: 'sole', status: 'imperfect', tip: 'Keep the "o" vowel pure' },
+    ],
+  },
+  {
+    language: 'German',
+    langCode: 'de-DE',
+    flag: '🇩🇪',
+    text: 'Ich wünsche Ihnen einen wunderschönen Tag',
+    translation: 'I wish you a wonderful day',
+    goodFeedback: [
+      'Accurate German soft "ch" sound in "Ich".',
+      'Crisp final devoiced consonant in "Tag".',
+      'Natural syllable compression in "einen".',
+    ],
+    flawedFeedback: [
+      'In "Ich", aim for a soft palate whisper rather than a hard "k" or "sh".',
+      'Make sure the "g" in "Tag" ends on a crisp, unvoiced "k" sound.',
+      'Solid confidence; keep practicing the soft "ch".',
+    ],
+    wordsGood: [
+      { word: 'Ich', status: 'perfect' },
+      { word: 'wünsche', status: 'perfect' },
+      { word: 'Ihnen', status: 'perfect' },
+      { word: 'einen', status: 'perfect' },
+      { word: 'wunderschönen', status: 'perfect' },
+      { word: 'Tag', status: 'perfect' },
+    ],
+    wordsFlawed: [
+      { word: 'Ich', status: 'imperfect', tip: 'Use the soft "ich-laut" whisper' },
+      { word: 'wünsche', status: 'good' },
+      { word: 'Ihnen', status: 'perfect' },
+      { word: 'einen', status: 'good' },
+      { word: 'wunderschönen', status: 'good' },
+      { word: 'Tag', status: 'imperfect', tip: 'End with a crisp "k"' },
     ],
   },
 ]
 
+type RecordingState = 'idle' | 'listening' | 'analyzing' | 'evaluated'
+type ModelConnectionStatus = 'connected' | 'connecting' | 'offline'
+
+interface EvaluationResult {
+  detectedLanguage: string
+  detectedLangCode: string
+  detectedFlag: string
+  transcribedText: string
+  translation: string
+  score: number
+  grade: string
+  wordBreakdown: Array<{ word: string; status: 'perfect' | 'good' | 'imperfect'; tip?: string }>
+  feedback: string[]
+  articulationScore: number
+  intonationScore: number
+  fluencyScore: number
+}
+
 export function App() {
-  const [selectedLangId, setSelectedLangId] = useState<string>('es')
-  const [cardIndex, setCardIndex] = useState<number>(0)
-  const [isFlipped, setIsFlipped] = useState<boolean>(false)
-  const [masteredCount, setMasteredCount] = useState<number>(14)
-  const [streakCount, setStreakCount] = useState<number>(7)
-  const [practiceSessions, setPracticeSessions] = useState<number>(38)
-  const [recentlyLearned, setRecentlyLearned] = useState<string | null>(null)
+  const [recordingState, setRecordingState] = useState<RecordingState>('idle')
+  const [recordDuration, setRecordDuration] = useState<number>(0)
+  const [isPlayingReference, setIsPlayingReference] = useState<boolean>(false)
+  const [isPlayingUserAudio, setIsPlayingUserAudio] = useState<boolean>(false)
+  const [evaluationResult, setEvaluationResult] = useState<EvaluationResult | null>(null)
+  const [userAudioUrl, setUserAudioUrl] = useState<string | null>(null)
 
-  const currentLanguage =
-    LANGUAGES.find((lang) => lang.id === selectedLangId) || LANGUAGES[0]
-  const currentCard = currentLanguage.cards[cardIndex] || currentLanguage.cards[0]
+  // Local Model State (Fakeable Connection)
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
+  const [modelStatus, setModelStatus] = useState<ModelConnectionStatus>('connected')
+  const [modelName, setModelName] = useState<string>('Whisper-v3-Turbo + Wav2Vec2-Pronounce')
+  const [modelEndpoint, setModelEndpoint] = useState<string>('http://127.0.0.1:11434')
+  const [modelLatency, setModelLatency] = useState<number>(18)
+  const [gradingStrictness, setGradingStrictness] = useState<'lenient' | 'standard' | 'strict'>('standard')
+  const [hardwareEngine, setHardwareEngine] = useState<string>('Apple Metal (ANE / WebGPU)')
+  const [pingStatus, setPingStatus] = useState<string | null>(null)
 
-  const handleLanguageChange = (langId: string) => {
-    setSelectedLangId(langId)
-    setCardIndex(0)
-    setIsFlipped(false)
+  // References
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const recordingTimerRef = useRef<number | null>(null)
+  const userAudioPlayerRef = useRef<HTMLAudioElement | null>(null)
+  const detectionIndexRef = useRef<number>(0)
+
+  // Form IDs for accessibility
+  const endpointInputId = useId()
+  const modelSelectId = useId()
+  const hardwareSelectId = useId()
+  const strictnessSelectId = useId()
+  const latencySliderId = useId()
+
+  // Start Speaking / Recording
+  const handleStartRecording = async () => {
+    if (modelStatus === 'offline') {
+      alert('Local model is currently disconnected. Please connect the local model in settings.')
+      setIsSettingsOpen(true)
+      return
+    }
+
+    if (window.speechSynthesis) window.speechSynthesis.cancel()
+    setIsPlayingReference(false)
+    setIsPlayingUserAudio(false)
+    setRecordDuration(0)
+    audioChunksRef.current = []
+
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const mediaRecorder = new MediaRecorder(stream)
+        mediaRecorderRef.current = mediaRecorder
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data)
+          }
+        }
+
+        mediaRecorder.onstop = () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+          const audioUrl = URL.createObjectURL(audioBlob)
+          setUserAudioUrl(audioUrl)
+          stream.getTracks().forEach((track) => track.stop())
+        }
+
+        mediaRecorder.start(100)
+      }
+    } catch {
+      console.info('Using simulated local audio capture stream.')
+    }
+
+    setRecordingState('listening')
+
+    recordingTimerRef.current = window.setInterval(() => {
+      setRecordDuration((prev) => prev + 1)
+    }, 1000)
   }
 
-  const handleNextCard = () => {
-    setIsFlipped(false)
-    setCardIndex((prev) => (prev + 1) % currentLanguage.cards.length)
-    setPracticeSessions((prev) => prev + 1)
+  // Stop Recording & Trigger Automatic Local Model Evaluation
+  const handleStopRecording = () => {
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
+    }
+
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      try {
+        mediaRecorderRef.current.stop()
+      } catch (err) {
+        console.warn('Error stopping media recorder:', err)
+      }
+    }
+
+    setRecordingState('analyzing')
+
+    // Simulate local model inference latency
+    const simulatedInferenceDelay = Math.max(450, modelLatency * 12)
+
+    setTimeout(() => {
+      // Pick next detection from pool
+      const detectionData = FALLBACK_DETECTIONS[detectionIndexRef.current % FALLBACK_DETECTIONS.length]
+      detectionIndexRef.current += 1
+
+      const isHighQuality = Math.random() > 0.35
+      const baseScore = isHighQuality
+        ? Math.floor(Math.random() * 8) + 91
+        : Math.floor(Math.random() * 12) + 76
+
+      const strictnessAdjustment =
+        gradingStrictness === 'strict' ? -5 : gradingStrictness === 'lenient' ? 4 : 0
+      const finalScore = Math.min(99, Math.max(65, baseScore + strictnessAdjustment))
+
+      let grade = 'A'
+      if (finalScore >= 95) grade = 'A+ (Native Perfection)'
+      else if (finalScore >= 90) grade = 'A (Near Native)'
+      else if (finalScore >= 80) grade = 'B+ (Very Good)'
+      else grade = 'B (Clear Accent)'
+
+      const fluency = Math.min(98, finalScore + Math.floor(Math.random() * 6) - 2)
+      const intonation = Math.min(99, finalScore + Math.floor(Math.random() * 8) - 4)
+      const articulation = Math.min(97, finalScore + Math.floor(Math.random() * 5) - 3)
+
+      setEvaluationResult({
+        detectedLanguage: detectionData.language,
+        detectedLangCode: detectionData.langCode,
+        detectedFlag: detectionData.flag,
+        transcribedText: detectionData.text,
+        translation: detectionData.translation,
+        score: finalScore,
+        grade,
+        wordBreakdown: isHighQuality ? detectionData.wordsGood : detectionData.wordsFlawed,
+        feedback: isHighQuality ? detectionData.goodFeedback : detectionData.flawedFeedback,
+        articulationScore: articulation,
+        intonationScore: intonation,
+        fluencyScore: fluency,
+      })
+
+      setRecordingState('evaluated')
+    }, simulatedInferenceDelay)
   }
 
-  const handlePrevCard = () => {
-    setIsFlipped(false)
-    setCardIndex((prev) =>
-      prev === 0 ? currentLanguage.cards.length - 1 : prev - 1
-    )
+  const handleStartRecordingRef = useRef(handleStartRecording)
+  const handleStopRecordingRef = useRef(handleStopRecording)
+
+  useEffect(() => {
+    handleStartRecordingRef.current = handleStartRecording
+    handleStopRecordingRef.current = handleStopRecording
+  })
+
+  // Keyboard shortcut: Spacebar to toggle recording
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      ) {
+        return
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault()
+        if (recordingState === 'idle' || recordingState === 'evaluated') {
+          handleStartRecordingRef.current()
+        } else if (recordingState === 'listening') {
+          handleStopRecordingRef.current()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [recordingState])
+
+  // Clean up timers & audio resources on unmount
+  useEffect(() => {
+    return () => {
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
+      if (window.speechSynthesis) window.speechSynthesis.cancel()
+    }
+  }, [])
+
+  // Play Native Reference Pronunciation (Powered by Local Model / Speech Synthesis)
+  const handlePlayReference = () => {
+    if (!evaluationResult) return
+
+    if (isPlayingReference) {
+      if (window.speechSynthesis) window.speechSynthesis.cancel()
+      setIsPlayingReference(false)
+      return
+    }
+
+    if (isPlayingUserAudio && userAudioPlayerRef.current) {
+      userAudioPlayerRef.current.pause()
+      setIsPlayingUserAudio(false)
+    }
+
+    if (!('speechSynthesis' in window)) {
+      alert('Speech synthesis is not supported in this browser.')
+      return
+    }
+
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(evaluationResult.transcribedText)
+    utterance.lang = evaluationResult.detectedLangCode
+    utterance.rate = 0.9
+    utterance.pitch = 1.0
+
+    const voices = window.speechSynthesis.getVoices()
+    const matchingVoice = voices.find((v) => v.lang.startsWith(evaluationResult.detectedLangCode.slice(0, 2)))
+    if (matchingVoice) {
+      utterance.voice = matchingVoice
+    }
+
+    utterance.onstart = () => setIsPlayingReference(true)
+    utterance.onend = () => setIsPlayingReference(false)
+    utterance.onerror = () => setIsPlayingReference(false)
+
+    window.speechSynthesis.speak(utterance)
   }
 
-  const handleFlipCard = () => {
-    setIsFlipped(!isFlipped)
+  // Play User's Own Recorded Audio
+  const handlePlayUserAudio = () => {
+    if (isPlayingUserAudio) {
+      if (userAudioPlayerRef.current) userAudioPlayerRef.current.pause()
+      setIsPlayingUserAudio(false)
+      return
+    }
+
+    if (isPlayingReference) {
+      if (window.speechSynthesis) window.speechSynthesis.cancel()
+      setIsPlayingReference(false)
+    }
+
+    if (userAudioUrl) {
+      if (!userAudioPlayerRef.current) {
+        userAudioPlayerRef.current = new Audio(userAudioUrl)
+      } else {
+        userAudioPlayerRef.current.src = userAudioUrl
+      }
+
+      userAudioPlayerRef.current.onended = () => setIsPlayingUserAudio(false)
+      userAudioPlayerRef.current.onerror = () => setIsPlayingUserAudio(false)
+      userAudioPlayerRef.current.play()
+      setIsPlayingUserAudio(true)
+    } else {
+      setIsPlayingUserAudio(true)
+      setTimeout(() => setIsPlayingUserAudio(false), 2400)
+    }
   }
 
-  const handleMarkMastered = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    setMasteredCount((prev) => prev + 1)
-    setStreakCount((prev) => prev + 1)
-    setRecentlyLearned(currentCard.word)
-    setTimeout(() => setRecentlyLearned(null), 3000)
-    handleNextCard()
+  // Fake Ping Local Model
+  const handlePingModel = () => {
+    setPingStatus('Testing ping...')
+    setTimeout(() => {
+      if (modelStatus === 'offline') {
+        setPingStatus('Error: Connection refused at ' + modelEndpoint)
+      } else {
+        const pingTime = Math.floor(Math.random() * 8) + 12
+        setPingStatus(`✓ 200 OK — ${pingTime}ms via local Unix socket`)
+      }
+    }, 400)
+  }
+
+  // Toggle Fake Connection State
+  const handleToggleConnection = () => {
+    if (modelStatus === 'connected') {
+      setModelStatus('offline')
+    } else {
+      setModelStatus('connecting')
+      setTimeout(() => {
+        setModelStatus('connected')
+      }, 700)
+    }
   }
 
   return (
-    <div className="app-container">
-      {/* App Header & Navbar */}
-      <header className="app-header">
-        <div className="brand">
-          <div className="brand-icon" aria-hidden="true">
-            👑
+    <div className="simple-app-shell">
+      {/* Top Header: Brand & Local Model Connection Status */}
+      <header className="top-header">
+        <div className="brand-zone">
+          <div className="brand-crown">
+            <IconCrown />
           </div>
           <div>
-            <span className="brand-title">LanguageKing</span>
+            <h1 className="brand-name">LanguageKing</h1>
+            <p className="brand-tagline">On-Device Speech & Pronunciation Studio</p>
           </div>
-          <span className="brand-badge">React 19 + Vite</span>
         </div>
 
-        <div className="header-actions">
-          <div
-            className="streak-pill"
-            id="streak-indicator"
-            title="Your continuous daily learning streak"
+        {/* Local Model Status Pill */}
+        <div className="header-controls">
+          <button
+            id="model-connection-pill"
+            type="button"
+            className={`model-pill ${modelStatus}`}
+            onClick={() => setIsSettingsOpen(true)}
+            title="Configure or test local AI model connection"
           >
-            <span className="streak-flame">🔥</span>
-            <span>{streakCount} Day Streak</span>
-          </div>
-
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="github-link"
-            id="header-repo-link"
-          >
-            <span>GitHub</span>
-            <span aria-hidden="true">↗</span>
-          </a>
+            <span className="model-dot" aria-hidden="true" />
+            <span className="model-text">
+              {modelStatus === 'connected' && `Local Model: Connected (${modelLatency}ms)`}
+              {modelStatus === 'connecting' && 'Local Model: Connecting...'}
+              {modelStatus === 'offline' && 'Local Model: Offline'}
+            </span>
+            <IconGear className="gear-icon" />
+          </button>
         </div>
       </header>
 
-      <main>
-        {/* Hero Section */}
-        <section className="hero-section">
-          <div className="hero-pill">
-            <span>⚡ Next-Generation React Frontend</span>
-            <span>•</span>
-            <span>Fast, Modular & Interactive</span>
-          </div>
-
-          <h1 className="hero-title">
-            Rule Your Vocabulary with{' '}
-            <span className="gradient-text">Royal Mastery</span>
-          </h1>
-
-          <p className="hero-description">
-            Welcome to the newly initialized React frontend for LanguageKing.
-            Explore interactive flashcards, track streaks in real time, and
-            experience instantaneous Vite-powered development.
-          </p>
-
-          {/* Language Selector */}
-          <div className="language-selector-wrap">
-            <span className="selector-label">Choose Practice Language</span>
-            <div className="language-tabs" role="tablist" aria-label="Languages">
-              {LANGUAGES.map((lang) => (
-                <button
-                  key={lang.id}
-                  id={`lang-tab-${lang.id}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={lang.id === selectedLangId}
-                  className={`lang-tab-btn ${
-                    lang.id === selectedLangId ? 'active' : ''
-                  }`}
-                  onClick={() => handleLanguageChange(lang.id)}
-                >
-                  <span>{lang.flag}</span>
-                  <span>{lang.name}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Flashcard Practice Arena */}
-          <div className="practice-stage">
-            <div className="card-header-bar">
-              <span>
-                Card {cardIndex + 1} of {currentLanguage.cards.length}
-              </span>
-              <span>
-                {recentlyLearned ? (
-                  <strong style={{ color: 'var(--accent-emerald)' }}>
-                    ✓ Mastered {recentlyLearned}!
-                  </strong>
-                ) : (
-                  'Click card or button to reveal'
-                )}
-              </span>
-            </div>
-
-            <div
-              id="practice-flashcard"
-              className={`card-flip-container ${isFlipped ? 'flipped' : ''}`}
-              onClick={handleFlipCard}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  handleFlipCard()
-                }
-              }}
-              aria-label={`Flashcard: ${currentCard.word}. Press enter to flip`}
-            >
-              {/* Card Front */}
-              <div className="card-face card-front">
-                <div className="card-top-tag">
-                  <span className="difficulty-badge">{currentCard.level}</span>
-                  <span className="flip-hint">🔄 Click to Flip</span>
-                </div>
-
-                <div className="word-display">
-                  <h2 className="primary-word">{currentCard.word}</h2>
-                  <p className="phonetic">{currentCard.phonetic}</p>
-                </div>
-
-                <div className="card-bottom-info">
-                  <span>Category: {currentCard.category}</span>
-                  <span>{currentLanguage.name} {currentLanguage.flag}</span>
-                </div>
-              </div>
-
-              {/* Card Back */}
-              <div className="card-face card-back">
-                <div className="card-top-tag">
-                  <span className="difficulty-badge">{currentCard.category}</span>
-                  <span className="flip-hint">🔄 Click to Flip Back</span>
-                </div>
-
-                <div className="word-display">
-                  <h2 className="primary-word" style={{ color: 'var(--accent-gold)' }}>
-                    {currentCard.translation}
-                  </h2>
-                  <div className="example-sentence">
-                    <p><strong>Example:</strong> “{currentCard.example}”</p>
-                    <p style={{ color: 'var(--text-secondary)', marginTop: '4px' }}>
-                      “{currentCard.exampleTranslation}”
-                    </p>
-                  </div>
-                </div>
-
-                <div className="card-bottom-info">
-                  <span>Pronunciation: {currentCard.phonetic}</span>
-                  <span style={{ color: 'var(--accent-purple)' }}>Ready for recall</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Controls */}
-            <div className="card-controls">
-              <button
-                id="btn-prev-card"
-                type="button"
-                className="btn btn-secondary"
-                onClick={handlePrevCard}
-              >
-                ← Previous
-              </button>
-
-              <button
-                id="btn-flip-card"
-                type="button"
-                className="btn btn-primary"
-                onClick={handleFlipCard}
-              >
-                {isFlipped ? 'Show Prompt' : 'Reveal Meaning'}
-              </button>
-
-              <button
-                id="btn-master-card"
-                type="button"
-                className="btn btn-success"
-                onClick={handleMarkMastered}
-                title="Mark word as mastered and advance"
-              >
-                ✓ I Know This (+1)
-              </button>
-
-              <button
-                id="btn-next-card"
-                type="button"
-                className="btn btn-secondary"
-                onClick={handleNextCard}
-              >
-                Next →
-              </button>
-            </div>
-          </div>
-
-          {/* Real-time Metrics Grid */}
-          <div className="metrics-grid">
-            <div className="metric-card">
-              <div className="metric-icon-box">🏆</div>
-              <div>
-                <div className="metric-value">{masteredCount}</div>
-                <div className="metric-title">Words Mastered</div>
-              </div>
-            </div>
-
-            <div className="metric-card">
-              <div className="metric-icon-box">⚡</div>
-              <div>
-                <div className="metric-value">{practiceSessions}</div>
-                <div className="metric-title">Practice Repetitions</div>
-              </div>
-            </div>
-
-            <div className="metric-card">
-              <div className="metric-icon-box">🌐</div>
-              <div>
-                <div className="metric-value">{LANGUAGES.length}</div>
-                <div className="metric-title">Active Languages</div>
-              </div>
-            </div>
-
-            <div className="metric-card">
-              <div className="metric-icon-box">🚀</div>
-              <div>
-                <div className="metric-value">100%</div>
-                <div className="metric-title">Vite Build Efficiency</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Feature Highlights Section */}
-        <section className="features-section" aria-labelledby="features-heading">
-          <div className="section-header">
-            <h2 id="features-heading" className="section-title">
-              Engineered for Modern Language Mastery
-            </h2>
-            <p className="section-subtitle">
-              Built on React with zero extra bloat, clean modular structure, and instant reactivity.
+      {/* Main Studio Arena */}
+      <main className="studio-container">
+        {/* Practice Studio Stage */}
+        <section className="practice-stage-card" aria-label="Speaking practice arena">
+          <div className="studio-prompt-wrap">
+            <h2 className="studio-prompt-title">Say anything in a foreign language</h2>
+            <p className="studio-prompt-subtitle">
+              The local model automatically detects your language, transcribes what you said, and grades your pronunciation.
             </p>
           </div>
 
-          <div className="features-grid">
-            <div className="feature-card">
-              <div className="feature-emoji">⚡</div>
-              <h3 className="feature-heading">Sub-Millisecond HMR</h3>
-              <p className="feature-text">
-                Powered by Vite 6 and React 19 for instantaneous hot module
-                replacement and blistering-fast build speeds.
-              </p>
+          {/* Hero Microphone Interaction */}
+          <div className="mic-console-wrap">
+            <div className="mic-outer-ring">
+              <button
+                id="hero-mic-button"
+                type="button"
+                className={`hero-mic-btn ${recordingState}`}
+                onClick={() => {
+                  if (recordingState === 'idle' || recordingState === 'evaluated') {
+                    handleStartRecording()
+                  } else if (recordingState === 'listening') {
+                    handleStopRecording()
+                  }
+                }}
+                disabled={recordingState === 'analyzing'}
+                aria-label={
+                  recordingState === 'listening'
+                    ? 'Stop recording and evaluate'
+                    : 'Start speaking in any foreign language'
+                }
+              >
+                {recordingState === 'idle' && (
+                  <div className="mic-icon-inner">
+                    <IconMic />
+                    <span className="mic-subtext">Tap to Speak</span>
+                  </div>
+                )}
+
+                {recordingState === 'listening' && (
+                  <div className="mic-icon-inner listening">
+                    <span className="stop-square" aria-hidden="true" />
+                    <span className="mic-subtext">Stop & Grade</span>
+                    <span className="record-timer">00:0{recordDuration}</span>
+                  </div>
+                )}
+
+                {recordingState === 'analyzing' && (
+                  <div className="mic-icon-inner analyzing">
+                    <div className="spinner-ring" aria-hidden="true" />
+                    <span className="mic-subtext">Evaluating...</span>
+                  </div>
+                )}
+
+                {recordingState === 'evaluated' && (
+                  <div className="mic-icon-inner">
+                    <IconMic />
+                    <span className="mic-subtext">Speak Again</span>
+                  </div>
+                )}
+              </button>
+
+              {/* Acoustic Ripples while active */}
+              {recordingState === 'listening' && (
+                <>
+                  <div className="sound-ripple ripple-1" aria-hidden="true" />
+                  <div className="sound-ripple ripple-2" aria-hidden="true" />
+                </>
+              )}
             </div>
 
-            <div className="feature-card">
-              <div className="feature-emoji">🧠</div>
-              <h3 className="feature-heading">Spaced Repetition Ready</h3>
-              <p className="feature-text">
-                Architecture designed for easy integration with Leitner algorithms,
-                Anki-style decks, or AI-powered speech analysis.
-              </p>
-            </div>
+            {/* Status Text & Visualizer */}
+            <div className="mic-status-container">
+              {recordingState === 'idle' && (
+                <p className="mic-hint-text">
+                  Click the mic or press <kbd>Spacebar</kbd> to start speaking
+                </p>
+              )}
 
-            <div className="feature-card">
-              <div className="feature-emoji">🎨</div>
-              <h3 className="feature-heading">Pure Vanilla CSS</h3>
-              <p className="feature-text">
-                Zero bloated runtime utility overhead. Clean CSS custom properties,
-                responsive glassmorphism, and hardware-accelerated 3D transforms.
-              </p>
-            </div>
+              {recordingState === 'listening' && (
+                <div className="listening-bar-wrap">
+                  <p className="mic-active-text">
+                    Listening to your voice... speak naturally
+                  </p>
+                  <div className="audio-bars" aria-hidden="true">
+                    <span className="bar" />
+                    <span className="bar" />
+                    <span className="bar" />
+                    <span className="bar" />
+                    <span className="bar" />
+                    <span className="bar" />
+                    <span className="bar" />
+                    <span className="bar" />
+                  </div>
+                </div>
+              )}
 
-            <div className="feature-card">
-              <div className="feature-emoji">🔒</div>
-              <h3 className="feature-heading">Strict TypeScript</h3>
-              <p className="feature-text">
-                Type safety across all flashcards, language interfaces, and state
-                handlers ensuring resilient and bug-free scaling.
-              </p>
+              {recordingState === 'analyzing' && (
+                <div className="analyzing-wrap">
+                  <p className="analyzing-text">
+                    Local model detecting language & acoustic pronunciation...
+                  </p>
+                  <div className="eval-progress-bar">
+                    <div className="eval-progress-shimmer" />
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </section>
+
+        {/* Pronunciation Evaluation Card (Appears after speaking) */}
+        {evaluationResult && (
+          <section
+            id="evaluation-card"
+            className="evaluation-card"
+            aria-label="Pronunciation evaluation results"
+          >
+            {/* Tier 1: Hero Verdict Banner & Studio Audio Comparison Deck */}
+            <div className="eval-hero-banner">
+              <div className="eval-verdict-left">
+                <div className="score-ring-unit">
+                  <span className="score-num">{evaluationResult.score}</span>
+                  <span className="score-denom">/100</span>
+                </div>
+                <div className="verdict-text-block">
+                  <div className="detected-lang-tag">
+                    <span className="lang-flag">{evaluationResult.detectedFlag}</span>
+                    <span>{evaluationResult.detectedLanguage} Detected</span>
+                  </div>
+                  <h3 className="verdict-grade-title">{evaluationResult.grade}</h3>
+                </div>
+              </div>
+
+              {/* Studio Audio Comparison Deck */}
+              <div className="audio-comparison-deck">
+                <button
+                  id="play-reference-audio-btn"
+                  type="button"
+                  className={`audio-deck-btn native ${isPlayingReference ? 'active' : ''}`}
+                  onClick={handlePlayReference}
+                  title="Play how this phrase should sound in native pronunciation"
+                >
+                  <span className="btn-icon">{isPlayingReference ? <IconStop /> : <IconPlay />}</span>
+                  <div className="btn-label-block">
+                    <span className="btn-subtext">Native Model</span>
+                    <span className="btn-maintext">{isPlayingReference ? 'Playing...' : 'How It Should Sound'}</span>
+                  </div>
+                </button>
+
+                <button
+                  id="play-user-audio-btn"
+                  type="button"
+                  className={`audio-deck-btn user ${isPlayingUserAudio ? 'active' : ''}`}
+                  onClick={handlePlayUserAudio}
+                  title="Play back your own recorded voice"
+                >
+                  <span className="btn-icon">{isPlayingUserAudio ? <IconStop /> : <IconPlay />}</span>
+                  <div className="btn-label-block">
+                    <span className="btn-subtext">Your Voice</span>
+                    <span className="btn-maintext">{isPlayingUserAudio ? 'Playing...' : 'Your Recording'}</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Tier 2: Spoken Phrase with Integrated Word Clarity Tokens */}
+            <div className="spoken-phrase-stage">
+              <div className="phrase-tokens-flow">
+                {evaluationResult.wordBreakdown.map((item, idx) => (
+                  <div key={`${item.word}-${idx}`} className={`word-clarity-token ${item.status}`}>
+                    <span className="token-word">{item.word}</span>
+                    <span className="token-status-pill">
+                      {item.status === 'perfect' && <IconCheck />}
+                      {item.status === 'good' && '•'}
+                      {item.status === 'imperfect' && '▲'}
+                      <span className="pill-text">
+                        {item.status === 'perfect' ? 'Flawless' : item.status === 'good' ? 'Good' : 'Review'}
+                      </span>
+                    </span>
+                    {item.tip && <span className="token-tip-callout">{item.tip}</span>}
+                  </div>
+                ))}
+              </div>
+              <p className="phrase-translation-sub">“{evaluationResult.translation}”</p>
+            </div>
+
+            {/* Tier 3: Two-Column Diagnostic & Coaching Grid */}
+            <div className="eval-details-grid">
+              {/* Column A: Acoustic Precision */}
+              <div className="detail-panel acoustic-panel">
+                <h4 className="panel-title">Acoustic Balance</h4>
+                <div className="acoustic-gauges">
+                  <div className="gauge-row">
+                    <div className="gauge-label-row">
+                      <span>Articulation Clarity</span>
+                      <strong>{evaluationResult.articulationScore}%</strong>
+                    </div>
+                    <div className="gauge-track">
+                      <div
+                        className="gauge-bar emerald"
+                        style={{ width: `${evaluationResult.articulationScore}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="gauge-row">
+                    <div className="gauge-label-row">
+                      <span>Intonation & Melody</span>
+                      <strong>{evaluationResult.intonationScore}%</strong>
+                    </div>
+                    <div className="gauge-track">
+                      <div
+                        className="gauge-bar gold"
+                        style={{ width: `${evaluationResult.intonationScore}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="gauge-row">
+                    <div className="gauge-label-row">
+                      <span>Fluency & Cadence</span>
+                      <strong>{evaluationResult.fluencyScore}%</strong>
+                    </div>
+                    <div className="gauge-track">
+                      <div
+                        className="gauge-bar cyan"
+                        style={{ width: `${evaluationResult.fluencyScore}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Column B: Model Coaching Notes */}
+              <div className="detail-panel coaching-panel">
+                <h4 className="panel-title">Model Coaching Notes</h4>
+                <ul className="coaching-notes-list">
+                  {evaluationResult.feedback.map((tip) => (
+                    <li key={tip} className="coaching-note-item">
+                      <span className="note-sparkle">
+                        <IconSparkles />
+                      </span>
+                      <span className="note-text">{tip}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+
+            {/* Tier 4: Clean Action Footer */}
+            <div className="eval-action-footer">
+              <button
+                type="button"
+                className="primary-speak-again-btn"
+                onClick={() => {
+                  setEvaluationResult(null)
+                  handleStartRecording()
+                }}
+              >
+                <IconMic />
+                <span>Speak Another Phrase</span>
+              </button>
+            </div>
+          </section>
+        )}
       </main>
 
-      {/* Footer */}
-      <footer className="app-footer">
-        <div>
-          <span>© {new Date().getFullYear()} LanguageKing. All rights reserved.</span>
+      {/* Local Model Settings Modal (Fakes Local Model Connection) */}
+      {isSettingsOpen && (
+        <div
+          className="modal-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-title"
+          onClick={() => setIsSettingsOpen(false)}
+        >
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3 id="modal-title" className="modal-title">
+                  Local AI Model Connection
+                </h3>
+                <p className="modal-subtitle">
+                  Configure and test your on-device speech & pronunciation engine
+                </p>
+              </div>
+              <button
+                type="button"
+                className="close-btn"
+                onClick={() => setIsSettingsOpen(false)}
+                aria-label="Close settings"
+              >
+                <IconClose />
+              </button>
+            </div>
+
+            <div className="modal-body">
+              {/* Connection Status & Quick Toggle */}
+              <div className="setting-row highlight-row">
+                <div>
+                  <div className="setting-label">Connection State</div>
+                  <div className="setting-desc">Status of local Unix socket / localhost server</div>
+                </div>
+                <div className="toggle-cluster">
+                  <span className={`status-badge ${modelStatus}`}>
+                    {modelStatus === 'connected' && '● Connected'}
+                    {modelStatus === 'connecting' && '◌ Connecting...'}
+                    {modelStatus === 'offline' && '○ Disconnected'}
+                  </span>
+                  <button
+                    type="button"
+                    className={`btn-toggle-conn ${modelStatus}`}
+                    onClick={handleToggleConnection}
+                  >
+                    {modelStatus === 'connected' ? 'Disconnect' : 'Connect Model'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Model Backend Selector */}
+              <div className="setting-row">
+                <label htmlFor={modelSelectId} className="setting-label">
+                  Local Model Architecture
+                </label>
+                <select
+                  id={modelSelectId}
+                  className="setting-select"
+                  value={modelName}
+                  onChange={(e) => setModelName(e.target.value)}
+                >
+                  <option value="Whisper-v3-Turbo + Wav2Vec2-Pronounce">
+                    Whisper-v3-Turbo + Wav2Vec2 Pronounce (Automatic Language ID)
+                  </option>
+                  <option value="Whisper.cpp (Local Metal Quantized 8-bit)">
+                    Whisper.cpp (Local Metal Quantized 8-bit)
+                  </option>
+                  <option value="Ollama Speech / Llama-3.2-Audio-Instruct">
+                    Ollama Speech / Llama-3.2-Audio-Instruct
+                  </option>
+                  <option value="In-Browser WebGPU WASM (Zero-Server Local)">
+                    In-Browser WebGPU WASM (Zero-Server Local)
+                  </option>
+                </select>
+              </div>
+
+              {/* Endpoint Address */}
+              <div className="setting-row">
+                <label htmlFor={endpointInputId} className="setting-label">
+                  Local Endpoint URL
+                </label>
+                <div className="input-with-ping">
+                  <input
+                    id={endpointInputId}
+                    type="text"
+                    className="setting-input"
+                    value={modelEndpoint}
+                    onChange={(e) => setModelEndpoint(e.target.value)}
+                    placeholder="http://127.0.0.1:11434"
+                  />
+                  <button type="button" className="btn-ping" onClick={handlePingModel}>
+                    Ping
+                  </button>
+                </div>
+                {pingStatus && <p className="ping-result">{pingStatus}</p>}
+              </div>
+
+              {/* Hardware Acceleration Engine */}
+              <div className="setting-row">
+                <label htmlFor={hardwareSelectId} className="setting-label">
+                  Hardware Acceleration
+                </label>
+                <select
+                  id={hardwareSelectId}
+                  className="setting-select"
+                  value={hardwareEngine}
+                  onChange={(e) => setHardwareEngine(e.target.value)}
+                >
+                  <option value="Apple Metal (ANE / WebGPU)">Apple Metal (ANE / Unified RAM)</option>
+                  <option value="NVIDIA TensorRT / CUDA">NVIDIA TensorRT / CUDA</option>
+                  <option value="WebGPU FP16 In-Browser">WebGPU FP16 In-Browser</option>
+                  <option value="CPU AVX-512 Threaded">CPU AVX-512 Multi-threaded</option>
+                </select>
+              </div>
+
+              {/* Grading Strictness */}
+              <div className="setting-row">
+                <label htmlFor={strictnessSelectId} className="setting-label">
+                  Grading Strictness
+                </label>
+                <select
+                  id={strictnessSelectId}
+                  className="setting-select"
+                  value={gradingStrictness}
+                  onChange={(e) =>
+                    setGradingStrictness(e.target.value as 'lenient' | 'standard' | 'strict')
+                  }
+                >
+                  <option value="lenient">Lenient (Beginner friendly)</option>
+                  <option value="standard">Standard (Accurate CEFR baseline)</option>
+                  <option value="strict">Strict (Native speaker scrutiny)</option>
+                </select>
+              </div>
+
+              {/* Simulated Latency */}
+              <div className="setting-row">
+                <div className="slider-label-row">
+                  <label htmlFor={latencySliderId} className="setting-label">
+                    Simulated Inference Latency
+                  </label>
+                  <span className="slider-value">{modelLatency}ms</span>
+                </div>
+                <input
+                  id={latencySliderId}
+                  type="range"
+                  min="5"
+                  max="120"
+                  value={modelLatency}
+                  onChange={(e) => setModelLatency(Number(e.target.value))}
+                  className="setting-slider"
+                />
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-modal-save"
+                onClick={() => {
+                  setIsSettingsOpen(false)
+                }}
+              >
+                Save & Close
+              </button>
+            </div>
+          </div>
         </div>
-        <div className="footer-badges">
-          <span className="tech-tag">React 19</span>
-          <span className="tech-tag">TypeScript 5</span>
-          <span className="tech-tag">Vite 6</span>
-        </div>
+      )}
+
+      {/* Subtle Footer */}
+      <footer className="simple-footer">
+        <p>LanguageKing • Automatic Language Detection & On-Device Pronunciation Grader</p>
       </footer>
     </div>
   )
