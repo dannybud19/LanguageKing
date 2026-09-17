@@ -1,4 +1,10 @@
-import { useState, useRef, useEffect, useId } from 'react'
+import { useState, useRef, useEffect, useId, useCallback } from 'react'
+import { useSpeechEvaluation } from './speech/useSpeechEvaluation'
+import {
+  DEFAULT_BASE_URL,
+  DEFAULT_MODEL,
+  pingLocalModel,
+} from './speech/llm/localInterpreter'
 import './App.css'
 
 // Authored SVG Icons (Craft floor compliant)
@@ -71,236 +77,66 @@ function IconClose({ className = '' }: { className?: string }) {
 }
 
 // Spoken phrases pool for realistic automatic detection when speech recognition isn't available
-interface DetectedPhraseData {
-  language: string
-  langCode: string
-  flag: string
-  text: string
-  translation: string
-  goodFeedback: string[]
-  flawedFeedback: string[]
-  wordsGood: Array<{ word: string; status: 'perfect' | 'good' | 'imperfect'; tip?: string }>
-  wordsFlawed: Array<{ word: string; status: 'perfect' | 'good' | 'imperfect'; tip?: string }>
-}
-
-const FALLBACK_DETECTIONS: DetectedPhraseData[] = [
-  {
-    language: 'Spanish',
-    langCode: 'es-ES',
-    flag: '🇪🇸',
-    text: 'Me gustaría pedir un café con leche, por favor',
-    translation: 'I would like to order a coffee with milk, please',
-    goodFeedback: [
-      'Excellent natural cadence and clear syllable timing.',
-      'Vowels in "café" and "leche" were pure and unglided.',
-      'Soft Spanish dental "d" in "pedir" was articulated naturally.',
-    ],
-    flawedFeedback: [
-      'Soften the "d" in "pedir" — avoid a hard English stop.',
-      'Keep the "e" in "leche" crisp rather than drifting into a diphthong.',
-      'Good speech pace; keep practicing fluid consonant connections.',
-    ],
-    wordsGood: [
-      { word: 'Me', status: 'perfect' },
-      { word: 'gustaría', status: 'perfect' },
-      { word: 'pedir', status: 'perfect' },
-      { word: 'un', status: 'perfect' },
-      { word: 'café', status: 'perfect' },
-      { word: 'con', status: 'perfect' },
-      { word: 'leche,', status: 'perfect' },
-      { word: 'por', status: 'perfect' },
-      { word: 'favor', status: 'perfect' },
-    ],
-    wordsFlawed: [
-      { word: 'Me', status: 'perfect' },
-      { word: 'gustaría', status: 'good' },
-      { word: 'pedir', status: 'imperfect', tip: 'Soften the "d"' },
-      { word: 'un', status: 'perfect' },
-      { word: 'café', status: 'good' },
-      { word: 'con', status: 'perfect' },
-      { word: 'leche,', status: 'imperfect', tip: 'Keep the final vowel short' },
-      { word: 'por', status: 'good' },
-      { word: 'favor', status: 'good' },
-    ],
-  },
-  {
-    language: 'French',
-    langCode: 'fr-FR',
-    flag: '🇫🇷',
-    text: "C'est une très belle journée aujourd'hui",
-    translation: "It is a very beautiful day today",
-    goodFeedback: [
-      'Authentic French uvular "r" in "très".',
-      'Smooth liaison between "belle" and "journée".',
-      'Accurate mouth shape on the final vowel in "aujourd\'hui".',
-    ],
-    flawedFeedback: [
-      'Relax your tongue slightly for a softer French "r" in "très".',
-      'Make sure the "u" in "une" is rounded forward with pursed lips.',
-      'Cadence was expressive; focus on the rounded vowels.',
-    ],
-    wordsGood: [
-      { word: "C'est", status: 'perfect' },
-      { word: 'une', status: 'perfect' },
-      { word: 'très', status: 'perfect' },
-      { word: 'belle', status: 'perfect' },
-      { word: 'journée', status: 'perfect' },
-      { word: "aujourd'hui", status: 'perfect' },
-    ],
-    wordsFlawed: [
-      { word: "C'est", status: 'perfect' },
-      { word: 'une', status: 'imperfect', tip: 'Round your lips more on "u"' },
-      { word: 'très', status: 'imperfect', tip: 'Soften the uvular "r"' },
-      { word: 'belle', status: 'good' },
-      { word: 'journée', status: 'good' },
-      { word: "aujourd'hui", status: 'good' },
-    ],
-  },
-  {
-    language: 'Japanese',
-    langCode: 'ja-JP',
-    flag: '🇯🇵',
-    text: '美味しいご飯をありがとうございます',
-    translation: 'Thank you very much for the delicious meal',
-    goodFeedback: [
-      'Even mora timing throughout the entire sentence.',
-      'Natural devoiced "su" ending on "arigatou gozaimasu".',
-      'Clear, clean Japanese pitch accent.',
-    ],
-    flawedFeedback: [
-      'Keep the vowel lengths even on "oishii" so the double "i" is clearly held.',
-      'Lighten the final "u" in "gozaimasu" so it finishes softly.',
-      'Rhythm was friendly and respectful.',
-    ],
-    wordsGood: [
-      { word: '美味しい', status: 'perfect' },
-      { word: 'ご飯を', status: 'perfect' },
-      { word: 'ありがとう', status: 'perfect' },
-      { word: 'ございます', status: 'perfect' },
-    ],
-    wordsFlawed: [
-      { word: '美味しい', status: 'imperfect', tip: 'Hold the long "ii" sound' },
-      { word: 'ご飯を', status: 'good' },
-      { word: 'ありがとう', status: 'good' },
-      { word: 'ございます', status: 'imperfect', tip: 'Devoice the ending "su"' },
-    ],
-  },
-  {
-    language: 'Italian',
-    langCode: 'it-IT',
-    flag: '🇮🇹',
-    text: 'La vita è bella quando c’è il sole',
-    translation: 'Life is beautiful when the sun is out',
-    goodFeedback: [
-      'Musical intonation and authentic Italian cadence.',
-      'Pure, unglided vowels in "vita" and "bella".',
-      'Accurate double consonant duration on "bella".',
-    ],
-    flawedFeedback: [
-      'Hold the double "ll" in "bella" for double the duration.',
-      'Keep your "o" in "sole" crisp and open without an English glide.',
-      'Great musical flow; keep stressing the geminates.',
-    ],
-    wordsGood: [
-      { word: 'La', status: 'perfect' },
-      { word: 'vita', status: 'perfect' },
-      { word: 'è', status: 'perfect' },
-      { word: 'bella', status: 'perfect' },
-      { word: 'quando', status: 'perfect' },
-      { word: 'c’è', status: 'perfect' },
-      { word: 'il', status: 'perfect' },
-      { word: 'sole', status: 'perfect' },
-    ],
-    wordsFlawed: [
-      { word: 'La', status: 'perfect' },
-      { word: 'vita', status: 'good' },
-      { word: 'è', status: 'perfect' },
-      { word: 'bella', status: 'imperfect', tip: 'Hold the double "ll"' },
-      { word: 'quando', status: 'good' },
-      { word: 'c’è', status: 'perfect' },
-      { word: 'il', status: 'good' },
-      { word: 'sole', status: 'imperfect', tip: 'Keep the "o" vowel pure' },
-    ],
-  },
-  {
-    language: 'German',
-    langCode: 'de-DE',
-    flag: '🇩🇪',
-    text: 'Ich wünsche Ihnen einen wunderschönen Tag',
-    translation: 'I wish you a wonderful day',
-    goodFeedback: [
-      'Accurate German soft "ch" sound in "Ich".',
-      'Crisp final devoiced consonant in "Tag".',
-      'Natural syllable compression in "einen".',
-    ],
-    flawedFeedback: [
-      'In "Ich", aim for a soft palate whisper rather than a hard "k" or "sh".',
-      'Make sure the "g" in "Tag" ends on a crisp, unvoiced "k" sound.',
-      'Solid confidence; keep practicing the soft "ch".',
-    ],
-    wordsGood: [
-      { word: 'Ich', status: 'perfect' },
-      { word: 'wünsche', status: 'perfect' },
-      { word: 'Ihnen', status: 'perfect' },
-      { word: 'einen', status: 'perfect' },
-      { word: 'wunderschönen', status: 'perfect' },
-      { word: 'Tag', status: 'perfect' },
-    ],
-    wordsFlawed: [
-      { word: 'Ich', status: 'imperfect', tip: 'Use the soft "ich-laut" whisper' },
-      { word: 'wünsche', status: 'good' },
-      { word: 'Ihnen', status: 'perfect' },
-      { word: 'einen', status: 'good' },
-      { word: 'wunderschönen', status: 'good' },
-      { word: 'Tag', status: 'imperfect', tip: 'End with a crisp "k"' },
-    ],
-  },
-]
-
 type RecordingState = 'idle' | 'listening' | 'analyzing' | 'evaluated'
 type ModelConnectionStatus = 'connected' | 'connecting' | 'offline'
 
-interface EvaluationResult {
-  detectedLanguage: string
-  detectedLangCode: string
-  detectedFlag: string
-  transcribedText: string
-  translation: string
-  score: number
-  grade: string
-  wordBreakdown: Array<{ word: string; status: 'perfect' | 'good' | 'imperfect'; tip?: string }>
-  feedback: string[]
-  articulationScore: number
-  intonationScore: number
-  fluencyScore: number
-}
-
 export function App() {
-  const [recordingState, setRecordingState] = useState<RecordingState>('idle')
-  const [recordDuration, setRecordDuration] = useState<number>(0)
   const [isPlayingReference, setIsPlayingReference] = useState<boolean>(false)
   const [isPlayingUserAudio, setIsPlayingUserAudio] = useState<boolean>(false)
-  const [evaluationResult, setEvaluationResult] = useState<EvaluationResult | null>(null)
-  const [userAudioUrl, setUserAudioUrl] = useState<string | null>(null)
 
-  // Local Model State (Fakeable Connection)
+  // Local Model Connection
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
-  const [modelStatus, setModelStatus] = useState<ModelConnectionStatus>('connected')
-  const [modelName, setModelName] = useState<string>('Whisper-v3-Turbo + Wav2Vec2-Pronounce')
-  const [modelEndpoint, setModelEndpoint] = useState<string>('http://127.0.0.1:11434')
-  const [modelLatency, setModelLatency] = useState<number>(18)
+  const [modelStatus, setModelStatus] = useState<ModelConnectionStatus>('connecting')
+  /** The actual model tag served by the local server, e.g. "gemma4:e4b". */
+  const [modelName, setModelName] = useState<string>(DEFAULT_MODEL)
+  const [modelEndpoint, setModelEndpoint] = useState<string>(DEFAULT_BASE_URL)
+  const [modelLatency, setModelLatency] = useState<number>(0)
   const [gradingStrictness, setGradingStrictness] = useState<'lenient' | 'standard' | 'strict'>('standard')
   const [hardwareEngine, setHardwareEngine] = useState<string>('Apple Metal (ANE / WebGPU)')
   const [pingStatus, setPingStatus] = useState<string | null>(null)
+  const [installedModels, setInstalledModels] = useState<string[]>([])
 
-  // References
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const recordingTimerRef = useRef<number | null>(null)
+  /**
+   * The whole recognition loop. The acoustic stage settles the language and the
+   * score before the language model is consulted, and the model is optional --
+   * if the local server is down the learner still gets a language and a grade,
+   * just no written transcript or coaching notes.
+   */
+  const speech = useSpeechEvaluation({
+    baseUrl: modelEndpoint,
+    model: modelName,
+    strictness: gradingStrictness,
+    device: hardwareEngine.includes('WebGPU') ? undefined : 'wasm',
+  })
+
+  const evaluationResult = speech.result
+  const userAudioUrl = speech.userAudioUrl
+  const recordDuration = Math.floor(speech.recorder.durationMs / 1000)
+
+  // The UI's four states are a view over the pipeline's finer-grained stages.
+  const recordingState: RecordingState =
+    speech.stage === 'listening'
+      ? 'listening'
+      : speech.stage === 'loading-model' ||
+          speech.stage === 'recognizing' ||
+          speech.stage === 'interpreting'
+        ? 'analyzing'
+        : speech.stage === 'done'
+          ? 'evaluated'
+          : 'idle'
+
+  /** What the mic button's spinner should say, so a long first load is legible. */
+  const analysingLabel =
+    speech.stage === 'loading-model'
+      ? `Loading local models… ${Math.round(speech.modelProgress * 100)}%`
+      : speech.stage === 'recognizing'
+        ? 'Listening to your sounds…'
+        : speech.stage === 'interpreting'
+          ? 'Reading them back into words…'
+          : 'Analyzing…'
+
   const userAudioPlayerRef = useRef<HTMLAudioElement | null>(null)
-  const detectionIndexRef = useRef<number>(0)
 
-  // Form IDs for accessibility
   const endpointInputId = useId()
   const modelSelectId = useId()
   const hardwareSelectId = useId()
@@ -308,113 +144,22 @@ export function App() {
   const latencySliderId = useId()
 
   // Start Speaking / Recording
-  const handleStartRecording = async () => {
-    if (modelStatus === 'offline') {
-      alert('Local model is currently disconnected. Please connect the local model in settings.')
-      setIsSettingsOpen(true)
-      return
-    }
-
+  //
+  // No connection guard here, on purpose: recognition degrades gracefully. With
+  // the local model offline the learner still gets a detected language and a
+  // pronunciation score from the acoustic model, losing only the transcript and
+  // the written coaching. Blocking the mic would discard the working half.
+  const handleStartRecording = useCallback(async () => {
     if (window.speechSynthesis) window.speechSynthesis.cancel()
     setIsPlayingReference(false)
     setIsPlayingUserAudio(false)
-    setRecordDuration(0)
-    audioChunksRef.current = []
+    if (userAudioPlayerRef.current) userAudioPlayerRef.current.pause()
+    await speech.start()
+  }, [speech])
 
-    try {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-        const mediaRecorder = new MediaRecorder(stream)
-        mediaRecorderRef.current = mediaRecorder
-
-        mediaRecorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            audioChunksRef.current.push(event.data)
-          }
-        }
-
-        mediaRecorder.onstop = () => {
-          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-          const audioUrl = URL.createObjectURL(audioBlob)
-          setUserAudioUrl(audioUrl)
-          stream.getTracks().forEach((track) => track.stop())
-        }
-
-        mediaRecorder.start(100)
-      }
-    } catch {
-      console.info('Using simulated local audio capture stream.')
-    }
-
-    setRecordingState('listening')
-
-    recordingTimerRef.current = window.setInterval(() => {
-      setRecordDuration((prev) => prev + 1)
-    }, 1000)
-  }
-
-  // Stop Recording & Trigger Automatic Local Model Evaluation
-  const handleStopRecording = () => {
-    if (recordingTimerRef.current) {
-      clearInterval(recordingTimerRef.current)
-      recordingTimerRef.current = null
-    }
-
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      try {
-        mediaRecorderRef.current.stop()
-      } catch (err) {
-        console.warn('Error stopping media recorder:', err)
-      }
-    }
-
-    setRecordingState('analyzing')
-
-    // Simulate local model inference latency
-    const simulatedInferenceDelay = Math.max(450, modelLatency * 12)
-
-    setTimeout(() => {
-      // Pick next detection from pool
-      const detectionData = FALLBACK_DETECTIONS[detectionIndexRef.current % FALLBACK_DETECTIONS.length]
-      detectionIndexRef.current += 1
-
-      const isHighQuality = Math.random() > 0.35
-      const baseScore = isHighQuality
-        ? Math.floor(Math.random() * 8) + 91
-        : Math.floor(Math.random() * 12) + 76
-
-      const strictnessAdjustment =
-        gradingStrictness === 'strict' ? -5 : gradingStrictness === 'lenient' ? 4 : 0
-      const finalScore = Math.min(99, Math.max(65, baseScore + strictnessAdjustment))
-
-      let grade = 'A'
-      if (finalScore >= 95) grade = 'A+ (Native Perfection)'
-      else if (finalScore >= 90) grade = 'A (Near Native)'
-      else if (finalScore >= 80) grade = 'B+ (Very Good)'
-      else grade = 'B (Clear Accent)'
-
-      const fluency = Math.min(98, finalScore + Math.floor(Math.random() * 6) - 2)
-      const intonation = Math.min(99, finalScore + Math.floor(Math.random() * 8) - 4)
-      const articulation = Math.min(97, finalScore + Math.floor(Math.random() * 5) - 3)
-
-      setEvaluationResult({
-        detectedLanguage: detectionData.language,
-        detectedLangCode: detectionData.langCode,
-        detectedFlag: detectionData.flag,
-        transcribedText: detectionData.text,
-        translation: detectionData.translation,
-        score: finalScore,
-        grade,
-        wordBreakdown: isHighQuality ? detectionData.wordsGood : detectionData.wordsFlawed,
-        feedback: isHighQuality ? detectionData.goodFeedback : detectionData.flawedFeedback,
-        articulationScore: articulation,
-        intonationScore: intonation,
-        fluencyScore: fluency,
-      })
-
-      setRecordingState('evaluated')
-    }, simulatedInferenceDelay)
-  }
+  const handleStopRecording = useCallback(async () => {
+    await speech.stop()
+  }, [speech])
 
   const handleStartRecordingRef = useRef(handleStartRecording)
   const handleStopRecordingRef = useRef(handleStopRecording)
@@ -449,10 +194,10 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [recordingState])
 
-  // Clean up timers & audio resources on unmount
+  // Clean up audio resources on unmount. Recording timers belong to the
+  // recorder hook, which tears down its own.
   useEffect(() => {
     return () => {
-      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
       if (window.speechSynthesis) window.speechSynthesis.cancel()
     }
   }, [])
@@ -474,6 +219,12 @@ export function App() {
 
     if (!('speechSynthesis' in window)) {
       alert('Speech synthesis is not supported in this browser.')
+      return
+    }
+
+    if (!evaluationResult.transcribedText) {
+      // Nothing to read back: the acoustic track produced a score but the
+      // local model was not there to turn the sounds into words.
       return
     }
 
@@ -526,30 +277,60 @@ export function App() {
     }
   }
 
-  // Fake Ping Local Model
-  const handlePingModel = () => {
-    setPingStatus('Testing ping...')
-    setTimeout(() => {
-      if (modelStatus === 'offline') {
-        setPingStatus('Error: Connection refused at ' + modelEndpoint)
-      } else {
-        const pingTime = Math.floor(Math.random() * 8) + 12
-        setPingStatus(`✓ 200 OK — ${pingTime}ms via local Unix socket`)
-      }
-    }, 400)
-  }
+  /**
+   * Check the local model server for real.
+   *
+   * Listing the models matters more than a bare reachability check, because
+   * "connection refused" and "connected, but that model was never pulled" are
+   * different problems with different fixes, and the second one is otherwise
+   * indistinguishable from the model simply being bad.
+   */
+  const handlePingModel = useCallback(async () => {
+    setPingStatus('Testing connection…')
+    setModelStatus('connecting')
 
-  // Toggle Fake Connection State
-  const handleToggleConnection = () => {
-    if (modelStatus === 'connected') {
+    const result = await pingLocalModel({ baseUrl: modelEndpoint, model: modelName })
+
+    setInstalledModels(result.models)
+    setModelLatency(Math.round(result.latencyMs))
+
+    if (!result.ok) {
       setModelStatus('offline')
-    } else {
-      setModelStatus('connecting')
-      setTimeout(() => {
-        setModelStatus('connected')
-      }, 700)
+      setPingStatus(`✗ No server at ${modelEndpoint} — ${result.message}`)
+      return
     }
-  }
+
+    setModelStatus('connected')
+    if (result.hasModel) {
+      setPingStatus(`✓ ${modelName} ready — ${Math.round(result.latencyMs)}ms`)
+    } else {
+      setPingStatus(
+        `⚠ Server up, but "${modelName}" is not installed. ` +
+          (result.models.length
+            ? `Available: ${result.models.slice(0, 4).join(', ')}`
+            : 'No models installed.'),
+      )
+    }
+  }, [modelEndpoint, modelName])
+
+  // Check once on mount so the header pill reflects reality rather than a guess.
+  useEffect(() => {
+    void handlePingModel()
+    // Intentionally mount-only; re-checking on every keystroke in the endpoint
+    // field would spam the server.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const handleToggleConnection = useCallback(() => {
+    if (modelStatus === 'connected') {
+      // Purely a local view state: there is no session to tear down, so this
+      // just stops the app expecting a transcript until it is checked again.
+      setModelStatus('offline')
+      setPingStatus('Disconnected locally — press Test Connection to reconnect.')
+    } else {
+      void handlePingModel()
+    }
+  }, [modelStatus, handlePingModel])
 
   return (
     <div className="simple-app-shell">
@@ -628,14 +409,18 @@ export function App() {
                   <div className="mic-icon-inner listening">
                     <span className="stop-square" aria-hidden="true" />
                     <span className="mic-subtext">Stop & Grade</span>
-                    <span className="record-timer">00:0{recordDuration}</span>
+                    <span className="record-timer">
+                      {`00:${String(recordDuration).padStart(2, '0')}`}
+                    </span>
                   </div>
                 )}
 
                 {recordingState === 'analyzing' && (
                   <div className="mic-icon-inner analyzing">
                     <div className="spinner-ring" aria-hidden="true" />
-                    <span className="mic-subtext">Evaluating...</span>
+                    <span className="mic-subtext">
+                      {speech.stage === 'loading-model' ? 'Loading…' : 'Evaluating...'}
+                    </span>
                   </div>
                 )}
 
@@ -684,11 +469,16 @@ export function App() {
 
               {recordingState === 'analyzing' && (
                 <div className="analyzing-wrap">
-                  <p className="analyzing-text">
-                    Local model detecting language & acoustic pronunciation...
-                  </p>
+                  <p className="analyzing-text">{analysingLabel}</p>
                   <div className="eval-progress-bar">
-                    <div className="eval-progress-shimmer" />
+                    {speech.stage === 'loading-model' ? (
+                      <div
+                        className="eval-progress-shimmer"
+                        style={{ width: `${Math.round(speech.modelProgress * 100)}%` }}
+                      />
+                    ) : (
+                      <div className="eval-progress-shimmer" />
+                    )}
                   </div>
                 </div>
               )}
@@ -713,8 +503,18 @@ export function App() {
                 <div className="verdict-text-block">
                   <div className="detected-lang-tag">
                     <span className="lang-flag">{evaluationResult.detectedFlag}</span>
-                    <span>{evaluationResult.detectedLanguage} Detected</span>
+                    <span>
+                      {evaluationResult.detectedLanguage} Detected
+                      {' · '}
+                      {Math.round(evaluationResult.languageConfidence * 100)}% confident
+                    </span>
                   </div>
+                  {evaluationResult.ambiguous && (
+                    <p className="detected-lang-note">
+                      Those sounds fit more than one language closely — treat the
+                      language above as a best guess.
+                    </p>
+                  )}
                   <h3 className="verdict-grade-title">{evaluationResult.grade}</h3>
                 </div>
               </div>
@@ -769,7 +569,15 @@ export function App() {
                   </div>
                 ))}
               </div>
-              <p className="phrase-translation-sub">“{evaluationResult.translation}”</p>
+              {evaluationResult.translation ? (
+                <p className="phrase-translation-sub">“{evaluationResult.translation}”</p>
+              ) : (
+                <p className="phrase-translation-sub">
+                  {speech.interpreterError
+                    ? 'Translation needs the local model — it is not responding.'
+                    : 'No translation available.'}
+                </p>
+              )}
             </div>
 
             {/* Tier 3: Two-Column Diagnostic & Coaching Grid */}
@@ -793,13 +601,17 @@ export function App() {
 
                   <div className="gauge-row">
                     <div className="gauge-label-row">
-                      <span>Intonation & Melody</span>
-                      <strong>{evaluationResult.intonationScore}%</strong>
+                      <span>Intonation &amp; Melody</span>
+                      <strong title="Needs pitch tracking, which the acoustic model does not produce yet.">
+                        {evaluationResult.intonationScore === null
+                          ? '—'
+                          : `${evaluationResult.intonationScore}%`}
+                      </strong>
                     </div>
                     <div className="gauge-track">
                       <div
                         className="gauge-bar gold"
-                        style={{ width: `${evaluationResult.intonationScore}%` }}
+                        style={{ width: `${evaluationResult.intonationScore ?? 0}%` }}
                       />
                     </div>
                   </div>
@@ -841,7 +653,7 @@ export function App() {
                 type="button"
                 className="primary-speak-again-btn"
                 onClick={() => {
-                  setEvaluationResult(null)
+                  speech.reset()
                   handleStartRecording()
                 }}
               >
@@ -916,18 +728,14 @@ export function App() {
                   value={modelName}
                   onChange={(e) => setModelName(e.target.value)}
                 >
-                  <option value="Whisper-v3-Turbo + Wav2Vec2-Pronounce">
-                    Whisper-v3-Turbo + Wav2Vec2 Pronounce (Automatic Language ID)
-                  </option>
-                  <option value="Whisper.cpp (Local Metal Quantized 8-bit)">
-                    Whisper.cpp (Local Metal Quantized 8-bit)
-                  </option>
-                  <option value="Ollama Speech / Llama-3.2-Audio-Instruct">
-                    Ollama Speech / Llama-3.2-Audio-Instruct
-                  </option>
-                  <option value="In-Browser WebGPU WASM (Zero-Server Local)">
-                    In-Browser WebGPU WASM (Zero-Server Local)
-                  </option>
+                  {/* Real model tags reported by the local server. Falls back to
+                      the configured value so the field is never empty before the
+                      first successful ping. */}
+                  {(installedModels.length ? installedModels : [modelName]).map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -972,6 +780,38 @@ export function App() {
 
               {/* Grading Strictness */}
               <div className="setting-row">
+                <label className="setting-label">Recognition Diagnostics</label>
+                <div className="diagnostics-block">
+                  {evaluationResult ? (
+                    <>
+                      {/* The raw sounds the acoustic model heard, uncorrected.
+                          Kept out of the learner-facing view by design. */}
+                      <p className="diagnostics-ipa">{evaluationResult.heardIpa || '(none)'}</p>
+                      <p className="diagnostics-meta">
+                        <span>
+                          {evaluationResult.detectedLanguage} ·{' '}
+                          {Math.round(evaluationResult.languageConfidence * 100)}%
+                          {evaluationResult.ambiguous ? ' (ambiguous)' : ''}
+                        </span>
+                        <span>{Math.round(evaluationResult.durationMs)}ms audio</span>
+                        <span>recognise {Math.round(evaluationResult.timings.recognizeMs)}ms</span>
+                        <span>interpret {Math.round(evaluationResult.timings.interpretMs)}ms</span>
+                      </p>
+                      {speech.interpreterError && (
+                        <p className="diagnostics-meta">
+                          <span>Local model: {speech.interpreterError}</span>
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <p className="diagnostics-empty">
+                      Record something to see the detected sounds and timings.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="setting-group">
                 <label htmlFor={strictnessSelectId} className="setting-label">
                   Grading Strictness
                 </label>
