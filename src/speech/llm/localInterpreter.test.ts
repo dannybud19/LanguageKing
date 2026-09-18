@@ -1,105 +1,114 @@
 import { describe, expect, it } from 'vitest'
-import { formatFreeSpeechPrompt, parseReading } from './localInterpreter'
-import type { LanguageGuess } from '../types'
+import { formatCoachPrompt, parseCoaching } from './localInterpreter'
+import type { ClarityScoredWord } from '../scoring/wordClarity'
 
-const RANKING: LanguageGuess[] = [
-  { code: 'es', name: 'Spanish', confidence: 0.72, acousticScore: 0.81 },
-  { code: 'it', name: 'Italian', confidence: 0.21, acousticScore: 0.66 },
+const WORDS: ClarityScoredWord[] = [
+  {
+    word: 'la',
+    start: 0,
+    end: 0.2,
+    score: 0.94,
+    status: 'perfect',
+    phonemes: ['l', 'a'],
+    weakest: null,
+  },
+  {
+    word: 'mariposa',
+    start: 0.2,
+    end: 1.1,
+    score: 0.54,
+    status: 'imperfect',
+    phonemes: ['m', 'a', 'ɾ', 'i', 'p', 'o', 's', 'a'],
+    weakest: { symbol: 'ɾ', confidence: 0.31 },
+  },
 ]
 
 const VALID = JSON.stringify({
-  language: { code: 'es', confidence: 0.9 },
-  text: 'la mariposa',
   translation: 'the butterfly',
-  words: [
-    { word: 'la', ipa: 'l a' },
-    { word: 'mariposa', ipa: 'm a ɾ i p o s a', note: 'The [ɾ] came out as an English [ɹ].' },
-  ],
+  notes: [{ word: 'mariposa', note: 'The r came out like an English r — try a quick single tap.' }],
   summary: 'Close — the tap is the one sound to work on.',
 })
 
-describe('formatFreeSpeechPrompt', () => {
-  it('includes the raw IPA and the acoustic ranking', () => {
-    const prompt = formatFreeSpeechPrompt({ heard: 'l a m a ɾ i', ranking: RANKING })
-    expect(prompt).toContain('heard: "l a m a ɾ i"')
-    expect(prompt).toContain('"es"')
-    expect(prompt).toContain('"it"')
+describe('formatCoachPrompt', () => {
+  const prompt = formatCoachPrompt({
+    transcript: 'la mariposa',
+    heard: 'l a m a ɹ i p o s a',
+    language: 'Spanish',
+    words: WORDS,
   })
 
-  it('omits studying and native when the app does not know them', () => {
-    // The product is specified as zero-config, so this is the normal case.
-    const prompt = formatFreeSpeechPrompt({ heard: 'l a', ranking: RANKING })
-    expect(prompt).not.toContain('studying:')
-    expect(prompt).not.toContain('native:')
+  it('gives the model the transcript and the uncorrected IPA', () => {
+    expect(prompt).toContain('transcript: "la mariposa"')
+    expect(prompt).toContain('l a m a ɹ i p o s a')
   })
 
-  it('includes them when they are known', () => {
-    const prompt = formatFreeSpeechPrompt({
+  it('passes the already-measured clarity through as whole percentages', () => {
+    expect(prompt).toContain('clarity: 94')
+    expect(prompt).toContain('clarity: 54')
+  })
+
+  it('names the least clear sound so a note can be specific', () => {
+    expect(prompt).toContain('least clear sound: "ɾ" at 31%')
+  })
+
+  it('mentions ambiguity only when the language was genuinely unclear', () => {
+    expect(prompt).not.toContain('not clear-cut')
+    const ambiguous = formatCoachPrompt({
+      transcript: 'la mariposa',
       heard: 'l a',
-      ranking: RANKING,
-      studying: 'es',
-      native: 'en',
+      language: 'Spanish',
+      words: WORDS,
+      ambiguous: true,
     })
-    expect(prompt).toContain('studying: "es"')
-    expect(prompt).toContain('native: "en"')
+    expect(ambiguous).toContain('not clear-cut')
   })
 })
 
-describe('parseReading', () => {
+describe('parseCoaching', () => {
   it('reads a well-formed response', () => {
-    const reading = parseReading(VALID)
-    expect(reading.language.code).toBe('es')
-    expect(reading.text).toBe('la mariposa')
-    expect(reading.translation).toBe('the butterfly')
-    expect(reading.words).toHaveLength(2)
-    expect(reading.words[1].note).toContain('[ɾ]')
+    const coaching = parseCoaching(VALID)
+    expect(coaching.translation).toBe('the butterfly')
+    expect(coaching.notes).toHaveLength(1)
+    expect(coaching.notes[0].word).toBe('mariposa')
+    expect(coaching.summary).toContain('tap')
   })
 
   it('tolerates markdown fences, which small local models add anyway', () => {
-    expect(parseReading('```json\n' + VALID + '\n```').text).toBe('la mariposa')
+    expect(parseCoaching('```json\n' + VALID + '\n```').translation).toBe('the butterfly')
   })
 
   it('tolerates commentary around the object', () => {
-    expect(parseReading(`Sure! Here you go:\n${VALID}\nHope that helps.`).text).toBe('la mariposa')
-  })
-
-  it('clamps a confidence the model reported out of range', () => {
-    const reading = parseReading(
-      JSON.stringify({ language: { code: 'es', confidence: 4.2 }, text: 'hola', words: [] }),
+    expect(parseCoaching(`Sure! Here you go:\n${VALID}\nHope that helps.`).translation).toBe(
+      'the butterfly',
     )
-    expect(reading.language.confidence).toBe(1)
   })
 
-  it('falls back to unknown rather than inventing a language', () => {
-    const reading = parseReading(JSON.stringify({ text: null, words: [] }))
-    expect(reading.language.code).toBe('unknown')
-    expect(reading.text).toBeNull()
+  it('treats an empty or whitespace translation as absent', () => {
+    expect(parseCoaching(JSON.stringify({ translation: '   ', notes: [] })).translation).toBeNull()
   })
 
-  it('treats an empty or whitespace text as no reading at all', () => {
-    expect(parseReading(JSON.stringify({ text: '   ', words: [] })).text).toBeNull()
-  })
-
-  it('drops malformed word entries instead of failing the utterance', () => {
-    const reading = parseReading(
+  it('drops malformed notes instead of failing the utterance', () => {
+    const coaching = parseCoaching(
       JSON.stringify({
-        language: { code: 'es', confidence: 0.8 },
-        text: 'hola',
-        words: [{ word: 'hola', ipa: 'o l a' }, { ipa: 'x' }, null],
+        translation: 'hello',
+        notes: [
+          { word: 'hola', note: 'Good.' },
+          { word: 'x' },
+          { note: 'orphan' },
+          { word: 'y', note: '   ' },
+          null,
+        ],
       }),
     )
-    expect(reading.words).toHaveLength(1)
-    expect(reading.words[0].word).toBe('hola')
+    expect(coaching.notes).toHaveLength(1)
+    expect(coaching.notes[0].word).toBe('hola')
   })
 
-  it('defaults a missing per-word ipa to empty rather than throwing', () => {
-    const reading = parseReading(
-      JSON.stringify({ language: { code: 'es' }, text: 'hola', words: [{ word: 'hola' }] }),
-    )
-    expect(reading.words[0].ipa).toBe('')
+  it('defaults a missing summary to empty rather than throwing', () => {
+    expect(parseCoaching(JSON.stringify({ translation: 'hi', notes: [] })).summary).toBe('')
   })
 
   it('throws when there is no JSON object at all', () => {
-    expect(() => parseReading('I could not work that one out, sorry.')).toThrow(/No JSON object/)
+    expect(() => parseCoaching('I could not work that one out, sorry.')).toThrow(/No JSON object/)
   })
 })

@@ -132,7 +132,7 @@ export function App() {
       : speech.stage === 'recognizing'
         ? 'Listening to your sounds…'
         : speech.stage === 'interpreting'
-          ? 'Reading them back into words…'
+          ? 'Writing your coaching notes…'
           : 'Analyzing…'
 
   const userAudioPlayerRef = useRef<HTMLAudioElement | null>(null)
@@ -795,7 +795,8 @@ export function App() {
                         </span>
                         <span>{Math.round(evaluationResult.durationMs)}ms audio</span>
                         <span>recognise {Math.round(evaluationResult.timings.recognizeMs)}ms</span>
-                        <span>interpret {Math.round(evaluationResult.timings.interpretMs)}ms</span>
+                        <span>transcribe {Math.round(evaluationResult.timings.transcribeMs)}ms</span>
+                        <span>coach {Math.round(evaluationResult.timings.interpretMs)}ms</span>
                       </p>
                       {speech.interpreterError && (
                         <p className="diagnostics-meta">

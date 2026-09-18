@@ -1,128 +1,135 @@
 /**
- * Interpretation against a local OpenAI-compatible server (Ollama, llama-server,
- * LM Studio). No API key, no cloud, no data leaving the machine.
+ * The coaching stage: Gemma 4 explains what the measurements mean.
  *
- * This is the free-speech counterpart to `gemmaAdapter.ts`. That module assumes a
- * lexicon supplies candidate words and instructs the model to choose among them.
- * The product is specified as "speak freely -- no forced scripts", so on this path
- * there are no candidates and the model must go from IPA to words directly.
+ * Three things about this boundary are deliberate.
  *
- * That inverts one of the original rules ("never invent a word") because there is
- * no list to choose from. The rule that actually protects the product is the other
- * one, and it is preserved absolutely: the model NEVER scores. Pronunciation
- * quality comes from the acoustic confidences in `score.ts` and nothing the model
- * returns can change a single point of it. The model only names what was said.
+ * First, Gemma never receives the audio. It gets the transcript Whisper already
+ * produced, the raw IPA wav2vec2 actually heard, and the per-word scores the
+ * acoustic track already computed. That is why a text-only build is the right
+ * choice, and why the model can be small.
+ *
+ * Second, Gemma never transcribes. Whisper heard the audio and is far better at
+ * reading it back than a language model guessing from IPA. Asking Gemma to
+ * transcribe would replace a good answer with a worse one.
+ *
+ * Third, and most importantly, Gemma never scores. A model trained to produce
+ * plausible text will render "I sink so" as "I think so", erasing the very error
+ * the app exists to report. Every number the learner sees is measured upstream
+ * and passed through here untouched -- this stage only puts words to it.
+ *
+ * What is left is the one job Gemma is genuinely best at: turning a phoneme
+ * diff into a sentence a learner can act on, and translating what they said.
  */
 
-import type { LanguageGuess } from '../types'
-
-/** Ollama's default. Also where llama-server and LM Studio are usually pointed. */
-export const DEFAULT_BASE_URL = 'http://127.0.0.1:11434'
+import type { ClarityScoredWord } from '../scoring/wordClarity'
 
 /**
- * Default tag. Deliberately a small, widely-published Gemma rather than the
- * 26B MoE named in `gemmaAdapter.ts`: this one actually pulls and responds in
- * about a second on a laptop. Override it in settings -- `listLocalModels`
- * reports what the server really has installed.
+ * LM Studio's OpenAI-compatible server. Ollama uses 11434 and llama-server
+ * 8080; all three speak this protocol, so only this default changes.
  */
-export const DEFAULT_MODEL = 'gemma3:4b'
+export const DEFAULT_BASE_URL = 'http://127.0.0.1:1234'
 
-export interface LocalInterpreterOptions {
+/**
+ * Default tag.
+ *
+ * Deliberately E4B rather than the 26B-A4B named in `gemmaAdapter.ts`. "A4B"
+ * means 4B active parameters per token, so it infers at 4B speed -- but all 26B
+ * of weights must still be resident, which is 14.4 GB at q4_0. This app runs
+ * wav2vec2 and Whisper in the browser at the same time, competing for the same
+ * unified memory, so the large variant does not fit on a 16 GB machine.
+ * Coaching from a transcript plus a phoneme diff does not need it.
+ */
+export const DEFAULT_MODEL = 'gemma-4-e4b-it-qat'
+
+export interface LocalCoachOptions {
   baseUrl?: string
   model?: string
   /** Abort a request that hangs, so one bad utterance cannot wedge the UI. */
   timeoutMs?: number
 }
 
-export interface FreeSpeechInput {
-  /** Raw IPA of what was actually said, uncorrected. */
+export interface CoachInput {
+  /** What Whisper heard, forced to the identified language. */
+  transcript: string
+  /** Raw IPA of the sounds actually produced, uncorrected. */
   heard: string
-  /** Inventory-based language ranking from the acoustic track. */
-  ranking: LanguageGuess[]
-  /** Language being practised, if the app happens to know. Usually unset. */
-  studying?: string
-  /** Learner's native language. */
-  native?: string
+  /** Display name of the identified language, e.g. "Spanish". */
+  language: string
+  /** Per-word acoustic scores. Already final -- the model cannot change them. */
+  words: ClarityScoredWord[]
+  /** True when two languages were too close to call. */
+  ambiguous?: boolean
 }
 
-/** One orthographic word the model believes it found in the IPA stream. */
-export interface ReadWord {
-  word: string
-  /** The slice of `heard` the model attributes to this word, space-separated. */
-  ipa: string
-  /** Plain-English note, only when something was off. */
-  note?: string
-}
-
-export interface FreeSpeechReading {
-  language: { code: string; confidence: number }
-  /** What the learner appears to have said, or null if it could not be read. */
-  text: string | null
-  /** English gloss, for the learner. */
+export interface Coaching {
+  /** English gloss of the transcript. */
   translation: string | null
-  words: ReadWord[]
+  /** One short, actionable note per word that needs work. */
+  notes: Array<{ word: string; note: string }>
+  /** One encouraging sentence about the utterance as a whole. */
   summary: string
 }
 
-const SYSTEM_PROMPT = `You are the interpretation stage of an offline pronunciation-coaching app.
+const SYSTEM_PROMPT = `You are the coaching stage of an offline pronunciation-coaching app.
 
-A language-agnostic phoneme recogniser has already listened to the learner and written
-down the sounds they ACTUALLY made, in IPA. It does not know what language they were
-attempting, and it never corrects mistakes. A separate acoustic stage has ranked which
-languages those sounds are consistent with.
+You are given, for one short utterance:
+- "transcript": the words the learner said, already transcribed by a speech recogniser.
+- "heard": the sounds they ACTUALLY produced, in IPA, written by a language-agnostic
+  phoneme recogniser that never corrects mistakes.
+- "words": each word with a clarity score from 0 to 100, already measured from the audio,
+  and the single least clear sound within it.
 
-Your job:
-1. Decide which language the learner was attempting. The supplied ranking is evidence,
-   not an answer -- it comes from phoneme inventory alone and it can be wrong.
-2. Read the IPA back into ordinary written words in that language.
-3. Split the IPA across those words, so each word carries the sounds it accounts for.
-4. Translate what they said into English.
+Your job is to explain, in plain English, what a learner should do differently.
 
 Hard rules:
-- NEVER silently fix pronunciation. If they said [s] where a dental fricative belongs,
-  write the word they were reaching for and say so in that word's note. Do not pretend
-  the sounds were correct, and do not rewrite the IPA to what it should have been.
-- The "ipa" you assign to each word must be taken from the input, in order, with nothing
-  added or substituted. Concatenated in order, the words' ipa must reproduce the input.
-- Do NOT score, grade, rate or judge how good the pronunciation was. You did not hear the
-  audio. Another stage measures that. Notes describe WHAT differed, never HOW WELL.
-- If the sounds do not read as any real utterance, return language "unknown", text null,
-  and an empty words array. An honest blank beats a confident invention.
+- Do NOT re-transcribe. The transcript is correct; use it as given.
+- Do NOT score, grade, re-rate or contradict the numbers. They were measured from audio
+  you did not hear. If a word scored 54, it scored 54, even if it looks fine to you.
+- Write a note ONLY for words that actually need work. A word that scored well needs no
+  note. Never invent a problem to fill space.
+- Each note is ONE short sentence, addressed to the learner, describing what differed and
+  what to do. No IPA symbols, no phonetic jargon, no academic terms. Say "the r sound",
+  not "the alveolar tap".
+- The translation is of the transcript, into natural English.
+- Be encouraging and specific. Never condescending.
 - Reply with JSON only. No markdown fences, no commentary.
 
 Output schema:
 {
-  "language":    { "code": "<iso639-1 or 'unknown'>", "confidence": <0..1> },
-  "text":        "<what they said, in normal orthography, or null>",
-  "translation": "<English gloss, or null>",
-  "words": [
-    { "word": "<orthographic word>", "ipa": "<its slice of the input ipa>",
-      "note": "<optional: one short plain-English sentence on what differed>" }
-  ],
-  "summary": "<one encouraging sentence for the learner>"
+  "translation": "<English meaning of the transcript, or null>",
+  "notes": [ { "word": "<the word, exactly as given>", "note": "<one short sentence>" } ],
+  "summary": "<one encouraging sentence about the whole utterance>"
 }`
 
-export function formatFreeSpeechPrompt(input: FreeSpeechInput): string {
-  const lines = [`heard: "${input.heard}"`]
-  if (input.studying) lines.push(`studying: "${input.studying}"`)
-  if (input.native) lines.push(`native: "${input.native}"`)
-  lines.push('acoustic language ranking (inventory evidence only):')
-  for (const guess of input.ranking.slice(0, 4)) {
-    lines.push(`  - { code: "${guess.code}", name: "${guess.name}", score: ${guess.acousticScore.toFixed(2)} }`)
+export function formatCoachPrompt(input: CoachInput): string {
+  const lines = [
+    `language: ${input.language}`,
+    `transcript: "${input.transcript}"`,
+    `heard (IPA, uncorrected): "${input.heard}"`,
+    'words:',
+  ]
+  for (const word of input.words) {
+    const weakest = word.weakest
+      ? `, least clear sound: "${word.weakest.symbol}" at ${Math.round(word.weakest.confidence * 100)}%`
+      : ''
+    lines.push(
+      `  - { word: "${word.word}", clarity: ${Math.round(word.score * 100)}${weakest} }`,
+    )
+  }
+  if (input.ambiguous) {
+    lines.push('note: the language identification was not clear-cut for this utterance.')
   }
   return lines.join('\n')
 }
 
-const clamp01 = (x: number) => (Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : 0)
-
 /**
- * Pull the reading out of a model response.
+ * Pull the coaching out of a model response.
  *
  * Tolerant of markdown fences and stray prose because a local 4B model follows
  * "JSON only" less reliably than a hosted one, and losing a whole utterance to a
  * stray backtick is a bad trade.
  */
-export function parseReading(text: string): FreeSpeechReading {
+export function parseCoaching(text: string): Coaching {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/)
   const body = (fenced ? fenced[1] : text).trim()
   const start = body.indexOf('{')
@@ -131,50 +138,41 @@ export function parseReading(text: string): FreeSpeechReading {
     throw new Error(`No JSON object in response: ${text.slice(0, 200)}`)
   }
 
-  const parsed = JSON.parse(body.slice(start, end + 1)) as Partial<FreeSpeechReading>
-  const words = Array.isArray(parsed.words) ? parsed.words : []
+  const parsed = JSON.parse(body.slice(start, end + 1)) as Partial<Coaching>
+  const notes = Array.isArray(parsed.notes) ? parsed.notes : []
 
   return {
-    language: {
-      code: parsed.language?.code ?? 'unknown',
-      confidence: clamp01(parsed.language?.confidence ?? 0),
-    },
-    text: typeof parsed.text === 'string' && parsed.text.trim() ? parsed.text : null,
     translation:
       typeof parsed.translation === 'string' && parsed.translation.trim()
-        ? parsed.translation
+        ? parsed.translation.trim()
         : null,
-    words: words
-      .filter((w): w is ReadWord => typeof w?.word === 'string')
-      .map((w) => ({
-        word: w.word,
-        ipa: typeof w.ipa === 'string' ? w.ipa : '',
-        note: typeof w.note === 'string' && w.note.trim() ? w.note : undefined,
-      })),
-    summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+    notes: notes
+      .filter(
+        (n): n is { word: string; note: string } =>
+          typeof n?.word === 'string' && typeof n?.note === 'string' && n.note.trim().length > 0,
+      )
+      .map((n) => ({ word: n.word, note: n.note.trim() })),
+    summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
   }
 }
 
-export interface FreeSpeechInterpreter {
-  read(input: FreeSpeechInput): Promise<FreeSpeechReading>
+export interface LocalCoach {
+  coach(input: CoachInput): Promise<Coaching>
 }
 
 /**
  * Talk to a local server over the OpenAI-compatible chat API.
  *
- * Ollama serves this at /v1/chat/completions alongside its native API; so do
- * llama-server and LM Studio. Using it rather than Ollama's native /api/chat is
- * what lets the endpoint be swapped in settings without a code change.
+ * LM Studio, Ollama and llama-server all serve this route, which is what lets
+ * the endpoint be changed in settings without a code change.
  */
-export function createLocalInterpreter(
-  options: LocalInterpreterOptions = {},
-): FreeSpeechInterpreter {
+export function createLocalCoach(options: LocalCoachOptions = {}): LocalCoach {
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
   const model = options.model ?? DEFAULT_MODEL
   const timeoutMs = options.timeoutMs ?? 30000
 
   return {
-    async read(input) {
+    async coach(input) {
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -187,10 +185,10 @@ export function createLocalInterpreter(
             model,
             messages: [
               { role: 'system', content: SYSTEM_PROMPT },
-              { role: 'user', content: formatFreeSpeechPrompt(input) },
+              { role: 'user', content: formatCoachPrompt(input) },
             ],
-            // Zero temperature: this is a reading task, not a creative one, and
-            // a resampled reading of the same sounds should not change.
+            // Zero temperature: the same measurements should produce the same
+            // advice twice, or learners cannot trust it.
             temperature: 0,
             response_format: { type: 'json_object' },
           }),
@@ -206,7 +204,7 @@ export function createLocalInterpreter(
         }
         const content = json.choices?.[0]?.message?.content
         if (!content) throw new Error('Local model returned no content')
-        return parseReading(content)
+        return parseCoaching(content)
       } catch (e) {
         if (e instanceof Error && e.name === 'AbortError') {
           throw new Error(`Local model did not respond within ${timeoutMs}ms`)
@@ -223,7 +221,7 @@ export interface PingResult {
   ok: boolean
   /** Round-trip time in milliseconds. */
   latencyMs: number
-  /** Model tags the server reports having installed. */
+  /** Model ids the server reports having loaded. */
   models: string[]
   /** True when the configured model is among them. */
   hasModel: boolean
@@ -231,16 +229,14 @@ export interface PingResult {
 }
 
 /**
- * Check a local server is up and report what it actually has installed.
+ * Check a local server is up and report what it actually has loaded.
  *
  * Listing the models matters more than a bare reachability check: "connection
- * refused" and "connected, but that model was never pulled" are different
- * problems with different fixes, and the second one is otherwise only
- * discoverable by recording an utterance and getting a 404.
+ * refused" and "running, but that model was never loaded" are different problems
+ * with different fixes, and the second is otherwise only discoverable by
+ * recording an utterance and getting a 404 back.
  */
-export async function pingLocalModel(
-  options: LocalInterpreterOptions = {},
-): Promise<PingResult> {
+export async function pingLocalModel(options: LocalCoachOptions = {}): Promise<PingResult> {
   const baseUrl = (options.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')
   const model = options.model ?? DEFAULT_MODEL
   const started = performance.now()
@@ -265,7 +261,7 @@ export async function pingLocalModel(
 
     const json = (await response.json()) as { data?: Array<{ id?: string }> }
     const models = (json.data ?? []).map((m) => m.id ?? '').filter(Boolean)
-    // Ollama reports "gemma3:4b"; a bare "gemma3" in settings should still count.
+    // Servers vary on whether the tag carries a quantisation suffix.
     const hasModel = models.some((m) => m === model || m.startsWith(`${model}:`))
 
     return {
@@ -275,7 +271,9 @@ export async function pingLocalModel(
       hasModel,
       message: hasModel
         ? `✓ ${model} ready — ${latencyMs}ms`
-        : `Connected (${latencyMs}ms), but ${model} is not installed. Run: ollama pull ${model}`,
+        : models.length > 0
+          ? `Connected (${latencyMs}ms). Loaded: ${models.join(', ')}`
+          : `Connected (${latencyMs}ms), but no model is loaded.`,
     }
   } catch (e) {
     return {
@@ -286,7 +284,7 @@ export async function pingLocalModel(
       message:
         e instanceof Error && e.name === 'AbortError'
           ? `No response from ${baseUrl}`
-          : `Cannot reach ${baseUrl}. Is the server running?`,
+          : `Cannot reach ${baseUrl}. Is the local server running?`,
     }
   }
 }
