@@ -1,11 +1,13 @@
 /**
- * The whole loop, as one hook: microphone -> phonemes -> language -> words ->
+ * The whole loop, as one hook: microphone -> language -> phonemes -> words ->
  * score -> coaching.
  *
- * The order matters and is not arbitrary. The acoustic stage runs first and
- * alone, so the language decision and every score are fixed before Gemma is told
- * anything. By the time the model is called, the only thing left for it to do is
- * explain measurements that are already final.
+ * Gemma is asked twice, for two different things. First, the moment recording
+ * stops, it hears the audio and names the language -- that answer reaches the
+ * UI in under a second, long before transcription finishes. Second, after every
+ * score is fixed, it is given the measurements as text and explains them. It is
+ * never asked to grade: the only thing left for it at that point is to put
+ * words to numbers that are already final.
  *
  * The model is also optional. If the local server is down the recogniser still
  * produces a transcript, a language and a score -- the learner loses the
@@ -23,11 +25,15 @@ import { analyseAudio, type FreeformResult } from './freeformPipeline'
 import { gradeUtterance, type Strictness } from './scoring/grade'
 import type { ClarityScoredWord } from './scoring/wordClarity'
 import { createLocalCoach, type Coaching } from './llm/localInterpreter'
+import { detectLanguage, type GemmaDetection } from './llm/languageDetector'
+import { profileForCode } from './language/catalog'
+import type { LanguageSource } from './language/decide'
 
 export type EvaluationStage =
   | 'idle'
   | 'loading-model'
   | 'listening'
+  | 'detecting'
   | 'recognizing'
   | 'interpreting'
   | 'done'
@@ -49,6 +55,10 @@ export interface Evaluation {
   /** True when two languages were too close to call. Worth surfacing. */
   ambiguous: boolean
   languageConfidence: number
+  /** "gemma" when the local model named the language, "phonemes" when it could not. */
+  languageSource: LanguageSource
+  /** Runner-up language, shown when the call was close. */
+  alternativeLanguage: string | null
 
   /** Raw IPA of what was actually said. Diagnostic; not shown to learners. */
   heardIpa: string
@@ -73,7 +83,16 @@ export interface Evaluation {
     recognizeMs: number
     transcribeMs: number
     interpretMs: number
+    /** Gemma's language answer, from end of recording. 0 when it did not answer. */
+    detectMs: number
   }
+}
+
+/** The language, as soon as Gemma names it -- before the rest of the result. */
+export interface EarlyLanguage {
+  name: string
+  flag: string
+  confidence: number
 }
 
 export interface SpeechEvaluationOptions {
@@ -98,6 +117,8 @@ export interface SpeechEvaluation {
   /** 0..1 while the browser models download on first run. */
   modelProgress: number
   result: Evaluation | null
+  /** Set within a second of recording stopping, if the local model answered. */
+  earlyLanguage: EarlyLanguage | null
   error: string | null
   /** Set when the acoustic stage succeeded but the local model did not. */
   interpreterError: string | null
@@ -155,6 +176,7 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
   const [stage, setStage] = useState<EvaluationStage>('idle')
   const [modelProgress, setModelProgress] = useState(0)
   const [result, setResult] = useState<Evaluation | null>(null)
+  const [earlyLanguage, setEarlyLanguage] = useState<EarlyLanguage | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [interpreterError, setInterpreterError] = useState<string | null>(null)
   const [userAudioUrl, setUserAudioUrl] = useState<string | null>(null)
@@ -175,9 +197,23 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
 
     setError(null)
     setInterpreterError(null)
+    setEarlyLanguage(null)
+
+    // Language first, and immediately: this request goes out before the
+    // browser models even start, and runs on the local server in parallel
+    // with them.
+    const gemmaLanguage = detectLanguage(audio, SAMPLE_RATE, { baseUrl: url, model: tag })
+    void gemmaLanguage.then((detected: GemmaDetection | null) => {
+      const top = detected?.ranking[0]
+      const profile = top ? profileForCode(top.code) : null
+      if (top && profile) {
+        setEarlyLanguage({ name: profile.name, flag: profile.flag, confidence: top.probability })
+      }
+    })
+
     // The first run downloads several hundred megabytes of browser models.
     // Without this the app looks hung for a minute.
-    setStage(modelsReady.current ? 'recognizing' : 'loading-model')
+    setStage(modelsReady.current ? 'detecting' : 'loading-model')
 
     let analysis: FreeformResult
     try {
@@ -186,11 +222,12 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
       // of recognition.
       const onProgress = (fraction: number) => {
         setModelProgress(fraction)
-        setStage((current) => (fraction >= 1 && current === 'loading-model' ? 'recognizing' : current))
+        setStage((current) => (fraction >= 1 && current === 'loading-model' ? 'detecting' : current))
       }
       analysis = await analyseAudio(audio, (audio.length / SAMPLE_RATE) * 1000, {
         phonemeModel: { device: dev, onProgress },
         whisperModel: { device: dev, onProgress },
+        gemmaLanguage,
       })
       modelsReady.current = true
     } catch (e) {
@@ -258,6 +295,8 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
       detectedFlag: analysis.profile?.flag ?? '🌐',
       ambiguous: analysis.ambiguous,
       languageConfidence: analysis.language.confidence,
+      languageSource: analysis.languageSource,
+      alternativeLanguage: analysis.ambiguous ? (analysis.ranking[1]?.name ?? null) : null,
 
       heardIpa: analysis.heard,
       transcribedText: analysis.transcript,
@@ -278,6 +317,7 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
         recognizeMs: analysis.timings.phonemeMs + analysis.timings.languageMs,
         transcribeMs: analysis.timings.transcribeMs,
         interpretMs,
+        detectMs: analysis.gemma?.latencyMs ?? 0,
       },
     })
     setStage('done')
@@ -324,6 +364,7 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
 
   const start = useCallback(async () => {
     setResult(null)
+    setEarlyLanguage(null)
     setError(null)
     setInterpreterError(null)
     capturedAt.current = performance.now()
@@ -343,6 +384,7 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
     }
     setUserAudioUrl(null)
     setResult(null)
+    setEarlyLanguage(null)
     setError(null)
     setInterpreterError(null)
     setStage('idle')
@@ -358,6 +400,7 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
       userAudioUrl,
       modelProgress,
       result,
+      earlyLanguage,
       error: combinedError,
       interpreterError,
       start,
@@ -370,6 +413,7 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
       userAudioUrl,
       modelProgress,
       result,
+      earlyLanguage,
       combinedError,
       interpreterError,
       start,

@@ -97,10 +97,11 @@ export function App() {
   const [installedModels, setInstalledModels] = useState<string[]>([])
 
   /**
-   * The whole recognition loop. The acoustic stage settles the language and the
-   * score before the language model is consulted, and the model is optional --
-   * if the local server is down the learner still gets a language and a grade,
-   * just no written transcript or coaching notes.
+   * The whole recognition loop. Gemma names the language from the audio the
+   * moment recording stops; the acoustic track settles every score; Gemma then
+   * explains them. The model is optional -- if the local server is down the
+   * learner still gets a language (from the phoneme inventory) and a grade,
+   * just no translation or coaching notes.
    */
   const speech = useSpeechEvaluation({
     baseUrl: modelEndpoint,
@@ -118,6 +119,7 @@ export function App() {
     speech.stage === 'listening'
       ? 'listening'
       : speech.stage === 'loading-model' ||
+          speech.stage === 'detecting' ||
           speech.stage === 'recognizing' ||
           speech.stage === 'interpreting'
         ? 'analyzing'
@@ -129,8 +131,10 @@ export function App() {
   const analysingLabel =
     speech.stage === 'loading-model'
       ? `Loading local models… ${Math.round(speech.modelProgress * 100)}%`
-      : speech.stage === 'recognizing'
-        ? 'Listening to your sounds…'
+      : speech.stage === 'detecting' || speech.stage === 'recognizing'
+        ? speech.earlyLanguage
+          ? `${speech.earlyLanguage.flag} ${speech.earlyLanguage.name} — grading your words…`
+          : 'Hearing which language you spoke…'
         : speech.stage === 'interpreting'
           ? 'Writing your coaching notes…'
           : 'Analyzing…'
@@ -511,8 +515,16 @@ export function App() {
                   </div>
                   {evaluationResult.ambiguous && (
                     <p className="detected-lang-note">
-                      Those sounds fit more than one language closely — treat the
-                      language above as a best guess.
+                      {evaluationResult.alternativeLanguage
+                        ? `It could also have been ${evaluationResult.alternativeLanguage} — `
+                        : 'That fit more than one language closely — '}
+                      treat the language above as a best guess.
+                    </p>
+                  )}
+                  {evaluationResult.languageSource === 'phonemes' && (
+                    <p className="detected-lang-note">
+                      Identified from your sounds alone — start the local model for a
+                      more reliable language call.
                     </p>
                   )}
                   <h3 className="verdict-grade-title">{evaluationResult.grade}</h3>
@@ -751,7 +763,7 @@ export function App() {
                     className="setting-input"
                     value={modelEndpoint}
                     onChange={(e) => setModelEndpoint(e.target.value)}
-                    placeholder="http://127.0.0.1:11434"
+                    placeholder="http://127.0.0.1:8080"
                   />
                   <button type="button" className="btn-ping" onClick={handlePingModel}>
                     Ping
@@ -791,9 +803,11 @@ export function App() {
                         <span>
                           {evaluationResult.detectedLanguage} ·{' '}
                           {Math.round(evaluationResult.languageConfidence * 100)}%
-                          {evaluationResult.ambiguous ? ' (ambiguous)' : ''}
+                          {evaluationResult.ambiguous ? ' (ambiguous)' : ''} · via{' '}
+                          {evaluationResult.languageSource}
                         </span>
                         <span>{Math.round(evaluationResult.durationMs)}ms audio</span>
+                        <span>language {Math.round(evaluationResult.timings.detectMs)}ms</span>
                         <span>recognise {Math.round(evaluationResult.timings.recognizeMs)}ms</span>
                         <span>transcribe {Math.round(evaluationResult.timings.transcribeMs)}ms</span>
                         <span>coach {Math.round(evaluationResult.timings.interpretMs)}ms</span>

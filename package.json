@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "build:lexicon": "node --experimental-strip-types scripts/build-lexicon.mts"
+    "build:lexicon": "node --experimental-strip-types scripts/build-lexicon.mts",
+    "model": "bash scripts/serve-gemma.sh"
   },
   "dependencies": {
     "@google/genai": "^2.23.0",

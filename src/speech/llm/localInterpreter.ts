@@ -3,10 +3,10 @@
  *
  * Three things about this boundary are deliberate.
  *
- * First, Gemma never receives the audio. It gets the transcript Whisper already
- * produced, the raw IPA wav2vec2 actually heard, and the per-word scores the
- * acoustic track already computed. That is why a text-only build is the right
- * choice, and why the model can be small.
+ * First, this stage never receives the audio. (Language identification, in
+ * `languageDetector.ts`, does -- that is a separate request.) It gets the
+ * transcript Whisper already produced, the raw IPA wav2vec2 actually heard, and
+ * the per-word scores the acoustic track already computed.
  *
  * Second, Gemma never transcribes. Whisper heard the audio and is far better at
  * reading it back than a language model guessing from IPA. Asking Gemma to
@@ -24,10 +24,12 @@
 import type { ClarityScoredWord } from '../scoring/wordClarity'
 
 /**
- * LM Studio's OpenAI-compatible server. Ollama uses 11434 and llama-server
- * 8080; all three speak this protocol, so only this default changes.
+ * llama-server, started by `npm run model`. It is the default because it is
+ * the runtime verified to pass audio through to Gemma 4 (with the mmproj file
+ * loaded), which language detection needs. LM Studio (1234) and Ollama (11434)
+ * speak the same protocol and work for coaching; set the URL in settings.
  */
-export const DEFAULT_BASE_URL = 'http://127.0.0.1:1234'
+export const DEFAULT_BASE_URL = 'http://127.0.0.1:8080'
 
 /**
  * Default tag.
@@ -191,6 +193,9 @@ export function createLocalCoach(options: LocalCoachOptions = {}): LocalCoach {
             // advice twice, or learners cannot trust it.
             temperature: 0,
             response_format: { type: 'json_object' },
+            // Gemma 4 may otherwise think at length before the JSON, which
+            // costs seconds and adds nothing to a one-sentence note.
+            chat_template_kwargs: { enable_thinking: false },
           }),
         })
 
