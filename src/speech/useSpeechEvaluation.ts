@@ -220,13 +220,18 @@ export function useSpeechEvaluation(options: SpeechEvaluationOptions = {}): Spee
       // Both models report through here. Once a download completes the stage
       // moves on, so a finished loader does not sit at "loading" for the whole
       // of recognition.
-      const onProgress = (fraction: number) => {
-        setModelProgress(fraction)
-        setStage((current) => (fraction >= 1 && current === 'loading-model' ? 'detecting' : current))
+      // Tracked per model and averaged: each reports its own 0..1, and letting
+      // either one's 100% end the loader hid the other's download.
+      const fractions = { phonemes: 0, whisper: 0 }
+      const progressFor = (which: keyof typeof fractions) => (fraction: number) => {
+        fractions[which] = fraction
+        const overall = (fractions.phonemes + fractions.whisper) / 2
+        setModelProgress(overall)
+        setStage((current) => (overall >= 1 && current === 'loading-model' ? 'detecting' : current))
       }
       analysis = await analyseAudio(audio, (audio.length / SAMPLE_RATE) * 1000, {
-        phonemeModel: { device: dev, onProgress },
-        whisperModel: { device: dev, onProgress },
+        phonemeModel: { device: dev, onProgress: progressFor('phonemes') },
+        whisperModel: { device: dev, onProgress: progressFor('whisper') },
         gemmaLanguage,
       })
       modelsReady.current = true

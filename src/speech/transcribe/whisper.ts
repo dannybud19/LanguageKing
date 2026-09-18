@@ -7,7 +7,7 @@
  * acoustic track, and Whisper's job is limited to "which words were these" and
  * "when was each one said".
  *
- * The decode is forced to the language the phoneme track picked. Left to
+ * The decode is forced to the language Gemma picked (see language/decide.ts). Left to
  * auto-detect, Whisper keys off accent, so a beginner attempting Spanish gets
  * transcribed as garbled English. The pipeline also cannot read Whisper's own
  * detected language -- the Transformers.js ASR pipeline returns only text and
@@ -15,8 +15,15 @@
  */
 
 import { pipeline } from '@huggingface/transformers'
+import { byteProgress } from '../modelProgress'
 
-export const WHISPER_MODEL_ID = 'onnx-community/whisper-large-v3-turbo'
+/**
+ * The `_timestamped` export, not the plain one. Word timings are computed from
+ * the decoder's cross-attention, and the plain ONNX export does not output it:
+ * every recording failed with "Model outputs must contain cross attentions to
+ * extract timestamps". Same weights and size otherwise.
+ */
+export const WHISPER_MODEL_ID = 'onnx-community/whisper-large-v3-turbo_timestamped'
 
 export interface WhisperLoadOptions {
   /** q4f16 keeps the pair of models near 880 MB total; int8 is more accurate. */
@@ -64,11 +71,7 @@ export async function loadTranscriber(options: WhisperLoadOptions = {}): Promise
         const asr = await pipeline('automatic-speech-recognition', model, {
           dtype,
           device,
-          progress_callback: (p: { status?: string; progress?: number }) => {
-            if (p.status === 'progress' && typeof p.progress === 'number') {
-              options.onProgress?.(Math.min(1, p.progress / 100))
-            }
-          },
+          progress_callback: byteProgress(options.onProgress),
         })
         return asr as unknown as Transcriber
       } catch (error) {

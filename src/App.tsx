@@ -526,6 +526,14 @@ export function App() {
 
             {/* Status Text & Visualizer */}
             <div className="mic-status-container">
+              {recordingState === 'idle' && speech.error && (
+                // A failed run returns the mic to idle; without this line the
+                // failure looked exactly like nothing having happened.
+                <p className="mic-error-text" role="alert">
+                  {speech.error}
+                </p>
+              )}
+
               {recordingState === 'idle' && (
                 <p className="mic-hint-text">
                   Click the mic or press <kbd>Spacebar</kbd> to start speaking

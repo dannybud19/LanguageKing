@@ -15,6 +15,7 @@ import { AutoFeatureExtractor, AutoModelForCTC, env } from '@huggingface/transfo
 import type { RecognizedPhoneme } from '../types'
 import { decodeGreedy, vocabFromJson } from './ctc'
 import vocabJson from '../../data/phoneme-vocab.json'
+import { byteProgress } from '../modelProgress'
 
 export const MODEL_ID = 'onnx-community/wav2vec2-lv-60-espeak-cv-ft-ONNX'
 
@@ -76,11 +77,7 @@ export async function loadRecognizer(options: LoadOptions = {}): Promise<Loaded>
         const model = await AutoModelForCTC.from_pretrained(MODEL_ID, {
           dtype: precision,
           device,
-          progress_callback: (p: { status?: string; progress?: number }) => {
-            if (p.status === 'progress' && typeof p.progress === 'number') {
-              options.onProgress?.(Math.min(1, p.progress / 100))
-            }
-          },
+          progress_callback: byteProgress(options.onProgress),
         })
         return { model, featureExtractor, vocab, device }
       } catch (error) {

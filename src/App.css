@@ -1152,3 +1152,12 @@ select:focus-visible {
   font-size: 0.78rem;
   color: rgba(231, 226, 214, 0.5);
 }
+
+/* A failed run returns the mic to idle, so the reason must be said out loud. */
+.mic-error-text {
+  margin: 0 auto 8px;
+  max-width: 440px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--accent-gold);
+}
