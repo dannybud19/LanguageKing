@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { formatCoachPrompt, parseCoaching } from './localInterpreter'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { connectLocalModel, formatCoachPrompt, parseCoaching, pickModel } from './localInterpreter'
 import type { ClarityScoredWord } from '../scoring/wordClarity'
 
 const WORDS: ClarityScoredWord[] = [
@@ -110,5 +110,60 @@ describe('parseCoaching', () => {
 
   it('throws when there is no JSON object at all', () => {
     expect(() => parseCoaching('I could not work that one out, sorry.')).toThrow(/No JSON object/)
+  })
+})
+
+describe('pickModel', () => {
+  it('prefers the configured id', () => {
+    expect(pickModel(['gemma-3-4b', 'gemma-4-e4b-it-qat'], 'gemma-4-e4b-it-qat')).toBe('gemma-4-e4b-it-qat')
+  })
+
+  it('accepts a Gemma served under a file path', () => {
+    // llama-server without --alias reports the GGUF path as the id.
+    const path = '/Users/x/.lmstudio/models/google/gemma-4-E4B-it-qat-q4_0-gguf/gemma-4-E4B_q4_0-it.gguf'
+    expect(pickModel([path])).toBe(path)
+  })
+
+  it('prefers Gemma 4 over older Gemma, and never an embedding model', () => {
+    expect(pickModel(['text-embedding-gemma', 'gemma3:4b', 'gemma4:e4b'])).toBe('gemma4:e4b')
+    expect(pickModel(['text-embedding-nomic-embed-text-v1.5'])).toBeNull()
+  })
+})
+
+describe('connectLocalModel', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  function serve(byOrigin: Record<string, string[]>) {
+    vi.stubGlobal('fetch', async (url: string) => {
+      const models = byOrigin[new URL(url).origin]
+      if (!models) throw new TypeError('Failed to fetch')
+      return new Response(JSON.stringify({ data: models.map((id) => ({ id })) }))
+    })
+  }
+
+  it('skips a server with no Gemma and finds the one that has it', async () => {
+    serve({
+      'http://127.0.0.1:1234': ['text-embedding-nomic-embed-text-v1.5'],
+      'http://127.0.0.1:8080': ['gemma-4-e4b-it-qat'],
+    })
+    const { connection } = await connectLocalModel({ baseUrl: 'http://127.0.0.1:1234' })
+    expect(connection).toMatchObject({ baseUrl: 'http://127.0.0.1:8080', model: 'gemma-4-e4b-it-qat' })
+  })
+
+  it('keeps the preferred endpoint when several have Gemma', async () => {
+    serve({
+      'http://127.0.0.1:8080': ['gemma-4-e4b-it-qat'],
+      'http://127.0.0.1:11434': ['gemma4:e4b'],
+    })
+    const { connection } = await connectLocalModel({ baseUrl: 'http://127.0.0.1:11434/' })
+    expect(connection?.baseUrl).toBe('http://127.0.0.1:11434')
+  })
+
+  it('explains each endpoint when nothing connects', async () => {
+    serve({ 'http://127.0.0.1:1234': ['text-embedding-nomic-embed-text-v1.5'] })
+    const { connection, report } = await connectLocalModel()
+    expect(connection).toBeNull()
+    expect(report.join('\n')).toMatch(/1234: server up, but no Gemma/)
+    expect(report.join('\n')).toMatch(/8080: not reachable/)
   })
 })

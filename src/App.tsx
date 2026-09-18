@@ -3,6 +3,8 @@ import { useSpeechEvaluation } from './speech/useSpeechEvaluation'
 import {
   DEFAULT_BASE_URL,
   DEFAULT_MODEL,
+  connectLocalModel,
+  pickModel,
   pingLocalModel,
 } from './speech/llm/localInterpreter'
 import './App.css'
@@ -80,6 +82,23 @@ function IconClose({ className = '' }: { className?: string }) {
 type RecordingState = 'idle' | 'listening' | 'analyzing' | 'evaluated'
 type ModelConnectionStatus = 'connected' | 'connecting' | 'offline'
 
+/** Remembered settings. Storage can be unavailable (private windows), so never throw. */
+function readSetting(key: string): string | null {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeSetting(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Not remembering the endpoint is harmless; it is rediscovered next time.
+  }
+}
+
 export function App() {
   const [isPlayingReference, setIsPlayingReference] = useState<boolean>(false)
   const [isPlayingUserAudio, setIsPlayingUserAudio] = useState<boolean>(false)
@@ -88,8 +107,12 @@ export function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false)
   const [modelStatus, setModelStatus] = useState<ModelConnectionStatus>('connecting')
   /** The actual model tag served by the local server, e.g. "gemma4:e4b". */
-  const [modelName, setModelName] = useState<string>(DEFAULT_MODEL)
-  const [modelEndpoint, setModelEndpoint] = useState<string>(DEFAULT_BASE_URL)
+  const [modelName, setModelName] = useState<string>(() => readSetting('lk.model') ?? DEFAULT_MODEL)
+  const [modelEndpoint, setModelEndpoint] = useState<string>(
+    () => readSetting('lk.endpoint') ?? DEFAULT_BASE_URL,
+  )
+  /** True after the learner pressed Disconnect, so polling does not undo it. */
+  const manuallyDisconnected = useRef(false)
   const [modelLatency, setModelLatency] = useState<number>(0)
   const [gradingStrictness, setGradingStrictness] = useState<'lenient' | 'standard' | 'strict'>('standard')
   const [hardwareEngine, setHardwareEngine] = useState<string>('Apple Metal (ANE / WebGPU)')
@@ -289,52 +312,108 @@ export function App() {
    * different problems with different fixes, and the second one is otherwise
    * indistinguishable from the model simply being bad.
    */
+  // The connect callback reads these through refs so polling does not restart
+  // on every keystroke in the endpoint field.
+  const modelEndpointRef = useRef(modelEndpoint)
+  const modelNameRef = useRef(modelName)
+  useEffect(() => {
+    modelEndpointRef.current = modelEndpoint
+    modelNameRef.current = modelName
+  }, [modelEndpoint, modelName])
+
+  const modelStatusRef = useRef(modelStatus)
+  useEffect(() => {
+    modelStatusRef.current = modelStatus
+  }, [modelStatus])
+
+  const applyConnection = useCallback(
+    (connection: { baseUrl: string; model: string; latencyMs: number; models: string[] }) => {
+      setModelEndpoint(connection.baseUrl)
+      setModelName(connection.model)
+      setInstalledModels(connection.models)
+      setModelLatency(Math.round(connection.latencyMs))
+      setModelStatus('connected')
+      setPingStatus(`✓ ${connection.model} ready at ${connection.baseUrl} — ${Math.round(connection.latencyMs)}ms`)
+      writeSetting('lk.endpoint', connection.baseUrl)
+      writeSetting('lk.model', connection.model)
+    },
+    [],
+  )
+
+  /**
+   * Find a local server with Gemma loaded, trying the saved endpoint first and
+   * then the usual ports. "Connected" means a Gemma model is actually there --
+   * a server that answers without one is still offline as far as the learner
+   * is concerned, since nothing it could do would help them.
+   */
+  const connect = useCallback(
+    async (quiet = false) => {
+      if (!quiet) {
+        setModelStatus('connecting')
+        setPingStatus('Looking for a local Gemma server…')
+      }
+      const { connection, report } = await connectLocalModel({
+        baseUrl: modelEndpointRef.current,
+        model: modelNameRef.current,
+      })
+      if (connection) {
+        manuallyDisconnected.current = false
+        applyConnection(connection)
+        return
+      }
+      setModelStatus('offline')
+      setPingStatus(`✗ No Gemma found. ${report.join(' · ')}. Start it with: npm run model`)
+    },
+    [applyConnection],
+  )
+
+  /** The Ping button: test exactly the endpoint typed in settings. */
   const handlePingModel = useCallback(async () => {
     setPingStatus('Testing connection…')
     setModelStatus('connecting')
-
     const result = await pingLocalModel({ baseUrl: modelEndpoint, model: modelName })
-
     setInstalledModels(result.models)
     setModelLatency(Math.round(result.latencyMs))
 
-    if (!result.ok) {
-      setModelStatus('offline')
-      setPingStatus(`✗ No server at ${modelEndpoint} — ${result.message}`)
+    const model = result.ok ? pickModel(result.models, modelName) : null
+    if (model) {
+      manuallyDisconnected.current = false
+      applyConnection({ baseUrl: modelEndpoint, model, latencyMs: result.latencyMs, models: result.models })
       return
     }
+    setModelStatus('offline')
+    setPingStatus(
+      result.ok
+        ? `⚠ Server at ${modelEndpoint} is up, but has no Gemma model loaded.` +
+            (result.models.length ? ` Available: ${result.models.slice(0, 4).join(', ')}` : '')
+        : `✗ No server at ${modelEndpoint} — ${result.message}`,
+    )
+  }, [modelEndpoint, modelName, applyConnection])
 
-    setModelStatus('connected')
-    if (result.hasModel) {
-      setPingStatus(`✓ ${modelName} ready — ${Math.round(result.latencyMs)}ms`)
-    } else {
-      setPingStatus(
-        `⚠ Server up, but "${modelName}" is not installed. ` +
-          (result.models.length
-            ? `Available: ${result.models.slice(0, 4).join(', ')}`
-            : 'No models installed.'),
-      )
-    }
-  }, [modelEndpoint, modelName])
-
-  // Check once on mount so the header pill reflects reality rather than a guess.
+  // Connect on mount, then keep trying every few seconds while offline, so
+  // starting the model after the app is open is picked up without a reload.
   useEffect(() => {
-    void handlePingModel()
-    // Intentionally mount-only; re-checking on every keystroke in the endpoint
-    // field would spam the server.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    // Quiet: status already starts as "connecting". State is set when the
+    // network answers, which is what this effect exists to sync with.
+    // oxlint-disable-next-line react/set-state-in-effect
+    void connect(true)
+    const timer = setInterval(() => {
+      if (modelStatusRef.current === 'offline' && !manuallyDisconnected.current) void connect(true)
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [connect])
 
   const handleToggleConnection = useCallback(() => {
     if (modelStatus === 'connected') {
-      // Purely a local view state: there is no session to tear down, so this
-      // just stops the app expecting a transcript until it is checked again.
+      // Purely a local view state: there is no session to tear down.
+      manuallyDisconnected.current = true
       setModelStatus('offline')
-      setPingStatus('Disconnected locally — press Test Connection to reconnect.')
+      setPingStatus('Disconnected locally — press Connect Model to reconnect.')
     } else {
-      void handlePingModel()
+      manuallyDisconnected.current = false
+      void connect()
     }
-  }, [modelStatus, handlePingModel])
+  }, [modelStatus, connect])
 
   return (
     <div className="simple-app-shell">

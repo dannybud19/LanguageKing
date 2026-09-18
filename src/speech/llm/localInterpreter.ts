@@ -294,4 +294,81 @@ export async function pingLocalModel(options: LocalCoachOptions = {}): Promise<P
   }
 }
 
+/**
+ * Where local servers usually listen: llama-server (`npm run model`), LM
+ * Studio, Ollama. Probed in this order when nothing is configured.
+ */
+export const CANDIDATE_ENDPOINTS = [
+  'http://127.0.0.1:8080',
+  'http://127.0.0.1:1234',
+  'http://127.0.0.1:11434',
+] as const
+
+/**
+ * Choose which of a server's models to talk to.
+ *
+ * The configured id wins if the server has it. Otherwise any Gemma model will
+ * do: servers name the same weights differently (llama-server reports the
+ * file path unless started with --alias, Ollama says "gemma4:e4b"), and
+ * refusing to connect over a naming difference is what made the app report
+ * "offline" with the model sitting right there.
+ */
+export function pickModel(models: string[], preferred: string = DEFAULT_MODEL): string | null {
+  const exact = models.find((m) => m === preferred || m.startsWith(`${preferred}:`))
+  if (exact) return exact
+  const gemma = models.filter((m) => /gemma/i.test(m) && !/embed/i.test(m))
+  // Prefer a Gemma 4 build when several are loaded.
+  return gemma.find((m) => /gemma[-_ ]?4/i.test(m)) ?? gemma[0] ?? null
+}
+
+export interface LocalConnection {
+  baseUrl: string
+  model: string
+  latencyMs: number
+  /** Everything the server reported, for the model picker. */
+  models: string[]
+}
+
+export interface ConnectResult {
+  connection: LocalConnection | null
+  /** One line per endpoint tried, for when nothing connected. */
+  report: string[]
+}
+
+/**
+ * Find a local server that actually has Gemma loaded.
+ *
+ * Every candidate is probed at once, so a dead port costs one timeout, not
+ * three. The preferred endpoint wins ties, so a server the learner chose in
+ * settings is kept even if another happens to be running too.
+ */
+export async function connectLocalModel(
+  preferred: { baseUrl?: string; model?: string } = {},
+): Promise<ConnectResult> {
+  const first = preferred.baseUrl?.replace(/\/+$/, '')
+  const endpoints = [...new Set([...(first ? [first] : []), ...CANDIDATE_ENDPOINTS])]
+  const pings = await Promise.all(
+    endpoints.map((baseUrl) => pingLocalModel({ baseUrl, model: preferred.model })),
+  )
+
+  const report: string[] = []
+  for (let i = 0; i < endpoints.length; i++) {
+    const ping = pings[i]
+    const model = ping.ok ? pickModel(ping.models, preferred.model) : null
+    if (model) {
+      return {
+        connection: { baseUrl: endpoints[i], model, latencyMs: ping.latencyMs, models: ping.models },
+        report,
+      }
+    }
+    report.push(
+      ping.ok
+        ? `${endpoints[i]}: server up, but no Gemma model loaded` +
+            (ping.models.length ? ` (has ${ping.models.join(', ')})` : '')
+        : `${endpoints[i]}: not reachable`,
+    )
+  }
+  return { connection: null, report }
+}
+
 export const _internal = { SYSTEM_PROMPT }
