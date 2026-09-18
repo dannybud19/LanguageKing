@@ -1,0 +1,6 @@
+{
+  "name": "LanguageKing",
+  "description": "Interactive speech and pronunciation studio evaluated by Google Gemma 4 AI",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

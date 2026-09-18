@@ -375,6 +375,49 @@ select:focus-visible {
   gap: 12px;
 }
 
+.live-speech-box {
+  background: rgba(99, 102, 241, 0.16);
+  border: 1px solid rgba(129, 140, 248, 0.35);
+  border-radius: var(--radius-full);
+  padding: 8px 20px;
+  max-width: 500px;
+  text-align: center;
+  animation: fadeIn 0.2s ease-in-out;
+}
+
+.live-speech-quote {
+  color: #e0e7ff;
+  font-size: 15px;
+  font-weight: 600;
+  font-style: italic;
+}
+
+.live-speech-target {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.live-speech-target strong {
+  color: #ffffff;
+}
+
+.custom-phrase-clear-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  transition: color var(--transition-fast);
+}
+
+.custom-phrase-clear-btn:hover {
+  color: #ffffff;
+}
+
 .mic-active-text {
   font-size: 15px;
   font-weight: 600;
@@ -1097,6 +1140,95 @@ select:focus-visible {
 }
 
 /* --------------------------------------------------------------------------
+   Gemma 4 Custom Phrase Input & Engine Badges
+   -------------------------------------------------------------------------- */
+.custom-phrase-bar {
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+}
+
+.custom-phrase-form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 540px;
+  background: rgba(18, 24, 41, 0.7);
+  padding: 6px 8px 6px 16px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-subtle);
+  backdrop-filter: blur(12px);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.custom-phrase-form:focus-within {
+  border-color: var(--accent-purple);
+  box-shadow: 0 0 16px rgba(129, 140, 248, 0.2);
+}
+
+.custom-phrase-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+}
+
+.custom-phrase-input::placeholder {
+  color: var(--text-muted);
+}
+
+.custom-phrase-submit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-full);
+  background: var(--accent-purple);
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.custom-phrase-submit-btn:hover:not(:disabled) {
+  background: #6366f1;
+  transform: translateY(-1px);
+}
+
+.custom-phrase-submit-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.engine-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--accent-gold);
+  border: 1px solid rgba(251, 191, 36, 0.3);
+  margin-top: 6px;
+}
+
+.phrase-phonetic-sub {
+  font-size: 13px;
+  color: var(--accent-gold);
+  font-family: 'JetBrains Mono', monospace;
+  margin-top: 6px;
+  letter-spacing: 0.02em;
+}
+
+/* --------------------------------------------------------------------------
    Simple Footer
    -------------------------------------------------------------------------- */
 .simple-footer {
@@ -1106,3 +1238,4 @@ select:focus-visible {
   font-size: 13px;
   color: var(--text-muted);
 }
+
